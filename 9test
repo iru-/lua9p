@@ -1,0 +1,3 @@
+#!/bin/sh
+
+(lua 9p.lua < /tmp/srv-cli) > /tmp/cli-srv

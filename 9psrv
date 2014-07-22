@@ -1,0 +1,5 @@
+#!/bin/sh
+
+rm -f /tmp/cli-srv /tmp/srv-cli
+mkfifo /tmp/cli-srv; mkfifo /tmp/srv-cli
+$HOME/Downloads/u9fs/u9fs -nz -a none -D </tmp/cli-srv >/tmp/srv-cli
