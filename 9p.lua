@@ -2,6 +2,31 @@ data = require "data"
 dio  = require "data_io"
 io   = require "io"
 
+fidfree   = nil
+fidactive = nil
+nextfid   = 0
+
+function newfid()
+  local f = fidfree
+
+  if (f) then
+    fidfree = f.next
+  else
+    f = {}
+    f.fid = nextfid;
+    nextfid = nextfid + 1;
+    f.next = fidactive
+    fidactive = f
+  end
+
+  return f
+end
+
+function freefid(f)
+  f.next = fidfree
+  fidfree = f
+end
+
 function perr(s) io.stderr:write(s .. "\n") end
 
 -- Returns a 9P number in table format. Offset and size in bytes
@@ -10,7 +35,6 @@ function num9p(offset, size)
 end
 
 function putstr(to, s)
-  -- XXX if an empty string is passed down, we segfault in setting p.s
   if #s > #to - 2 then return end
 
   local p = to:segment():layout{len = num9p(0, 2), s = {2, #s, 's'}}
@@ -24,6 +48,11 @@ function getstr(from)
   local len = p:layout{len = num9p(0, 2)}.len
   return p:layout{str = {2, len, 's'}}.str
 end
+
+function readmsg(to)
+  dio.read(to, 0, 4)
+  dio.read(to, 4, to.size - 4)
+end 
 
 
 function version()
@@ -47,8 +76,7 @@ function version()
   local rxbuf = data.new(8192)
   rxbuf:layout(Xversion)
 
-  dio.read(rxbuf, 0, 4)
-  dio.read(rxbuf, 4, rxbuf.size-4)
+  readmsg(rxbuf)
   return rxbuf.msize
 end
 
@@ -75,19 +103,19 @@ function attach(uname, aname)
   tx.size = 15 + 2 + #uname + 2 + #aname 
   tx.type = 104
   tx.tag  = 0
-  tx.fid  = 0
+  tx.fid  = newfid()
   tx.afid = -1
+
   putstr(tx:segment(15), uname)
   putstr(tx:segment(15 + 2 + #uname), aname)
   dio.write(tx, 0, tx.size)
 
   local rx = rxbuf:segment()
   rx:layout(LRattach)
-  dio.read(rx, 0, 4)
-  dio.read(rx, 4, rx.size-4)
+  readmsg(rx)
 end
 
-function walk(fid, newfid, name)
+function walk(ofid, nfid, name)
   local LTwalk = data.layout{
                  size   = num9p(0, 4),
                  type   = num9p(4, 1),
@@ -111,29 +139,29 @@ function walk(fid, newfid, name)
   tx.size   = 17 + (#name ~= 0 and 2 or 0) + #name
   tx.type   = 110
   tx.tag    = 0
-  tx.fid    = fid
-  tx.nfid   = newfid
+  tx.fid    = ofid
+  tx.nfid   = nfid
   tx.nwname = (#name ~= 0 and 1 or 0) 
   putstr(tx:segment(17), name)
   dio.write(tx, 0, tx.size)
 
   local rx = rxbuf:segment()
   rx:layout(LRwalk)
-  dio.read(rx, 0, 4)
-  dio.read(rx, 4, rx.size-4)
+  readmsg(rx)
 end
 
-function fidclone(fid, newfid)
-  walk(fid, newfid, "")
+function fidclone(ofid, nfid)
+  walk(ofid, nfid, "")
 end
 
 function _test()
-  msize = version()
-  txbuf = data.new(msize)
-  rxbuf = data.new(msize)
-  attach("iru", "")
-  walk(0, 1, "/tmp")
-  fidclone(1, 2)
+   msize = version()
+   txbuf = data.new(msize)
+   rxbuf = data.new(msize)
+   attach("iru", "")
+   local f = newfid() 
+   walk(0, f, "/tmp")
+   fidclone(f, newfid())
 end
 
 _test()
