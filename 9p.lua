@@ -27,6 +27,11 @@ function freefid(f)
   fidfree = f
 end
 
+function tag()
+  return 1
+end
+
+
 function perr(s) io.stderr:write(s .. "\n") end
 
 -- Returns a 9P number in table format. Offset and size in bytes
@@ -67,7 +72,7 @@ function version()
   txbuf:layout(Xversion)
   txbuf.size  = 19
   txbuf.type  = 100
-  txbuf.tag   = 0
+  txbuf.tag   = tag()
   txbuf.msize = 8192
 
   putstr(txbuf:segment(11), "9P2000")
@@ -102,7 +107,7 @@ function attach(uname, aname)
   tx:layout(LTattach)
   tx.size = 15 + 2 + #uname + 2 + #aname 
   tx.type = 104
-  tx.tag  = 0
+  tx.tag  = tag()
   tx.fid  = newfid()
   tx.afid = -1
 
@@ -138,7 +143,7 @@ function walk(ofid, nfid, name)
   -- #name == 0 clones the fid 
   tx.size   = 17 + (#name ~= 0 and 2 or 0) + #name
   tx.type   = 110
-  tx.tag    = 0
+  tx.tag    = tag()
   tx.fid    = ofid
   tx.nfid   = nfid
   tx.nwname = (#name ~= 0 and 1 or 0) 
