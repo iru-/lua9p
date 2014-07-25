@@ -55,49 +55,54 @@ function getstr(from)
 end
 
 function readmsg(to)
+  local p = to:segment():layout{size = num9p(0, 4)}
+
   dio.read(to, 0, 4)
-  dio.read(to, 4, to.size - 4)
+  dio.read(to, 4, p.size - 4)
 end 
 
-
-function version()
-  local Xversion = data.layout{
-                   size  = num9p(0, 4),
-                   type  = num9p(4, 1), 
-                   tag   = num9p(5, 2),
-                   msize = num9p(7, 4),
+function putheader(to, type, size)
+  local Lheader = data.layout{
+                    size = num9p(0, 4),
+                    type = num9p(4, 1),
+                    tag  = num9p(5, 2),
   }
 
-  local txbuf = data.new(19)
-  txbuf:layout(Xversion)
-  txbuf.size  = 19
-  txbuf.type  = 100
-  txbuf.tag   = tag()
-  txbuf.msize = 8192
+  local p = to:segment():layout(Lheader)
 
-  putstr(txbuf:segment(11), "9P2000")
-  dio.write(txbuf, 0, txbuf.size)
+  p.size = 7 + size
+  p.type = type
+  p.tag  = tag()
+  return p.size
+end
 
-  local rxbuf = data.new(8192)
-  rxbuf:layout(Xversion)
+function version()
+  local LXversion = data.layout{
+                    msize = num9p(7, 4),
+  }
 
-  readmsg(rxbuf)
-  return rxbuf.msize
+  local buf = data.new(19)
+  buf:layout(LXversion)
+  buf.msize = 8192
+
+  putstr(buf:segment(11), "9P2000")
+  putheader(buf, 100, 4 + 2 + 6)
+  dio.write(buf, 0, 19)
+
+  buf = data.new(8192)
+  buf:layout(LXversion)
+
+  readmsg(buf)
+  return buf.msize
 end
 
 function attach(uname, aname)
   local LTattach = data.layout{
-                   size = num9p(0, 4),
-                   type = num9p(4, 1),
-                   tag  = num9p(5, 2),
                    fid  = num9p(7, 4),
                    afid = num9p(11, 4),
   }
 
   local LRattach = data.layout{
-                   size  = num9p(0, 4),
-                   type  = num9p(4, 1),
-                   tag   = num9p(5, 2),
                    qtype = num9p(7, 1),
                    qvers = num9p(8, 4),
                    qpath = num9p(12, 8),
@@ -105,15 +110,14 @@ function attach(uname, aname)
 
   local tx = txbuf:segment()
   tx:layout(LTattach)
-  tx.size = 15 + 2 + #uname + 2 + #aname 
-  tx.type = 104
-  tx.tag  = tag()
+
   tx.fid  = newfid()
   tx.afid = -1
-
   putstr(tx:segment(15), uname)
   putstr(tx:segment(15 + 2 + #uname), aname)
-  dio.write(tx, 0, tx.size)
+  
+  local size = putheader(tx, 104, 8 + 2 + #uname + 2 + #aname)
+  dio.write(tx, 0, size)
 
   local rx = rxbuf:segment()
   rx:layout(LRattach)
@@ -122,9 +126,6 @@ end
 
 function walk(ofid, nfid, name)
   local LTwalk = data.layout{
-                 size   = num9p(0, 4),
-                 type   = num9p(4, 1),
-                 tag    = num9p(5, 2),
                  fid    = num9p(7, 4),
                  nfid   = num9p(11, 4),
                  nwname = num9p(15, 2),
@@ -141,14 +142,12 @@ function walk(ofid, nfid, name)
   tx:layout(LTwalk)
 
   -- #name == 0 clones the fid 
-  tx.size   = 17 + (#name ~= 0 and 2 or 0) + #name
-  tx.type   = 110
-  tx.tag    = tag()
+  local size = putheader(tx, 110, 10 + (#name ~= 0 and 2 or 0) + #name)
   tx.fid    = ofid
   tx.nfid   = nfid
   tx.nwname = (#name ~= 0 and 1 or 0) 
   putstr(tx:segment(17), name)
-  dio.write(tx, 0, tx.size)
+  dio.write(tx, 0, size)
 
   local rx = rxbuf:segment()
   rx:layout(LRwalk)
