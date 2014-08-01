@@ -313,6 +313,22 @@ function write(fid, offset, seg)
   return readmsg(Rwrite, rx)
 end
 
+function clunk(fid)
+  local LTclunk = data.layout{
+                  fid = num9p(7, 4),
+  }
+  
+  local tx = txbuf:segment()
+  tx:layout(LTclunk)
+  tx.fid = fid.fid
+
+  local n = putheader(tx, Tclunk, 4)
+  dio.write(tx, 0, n)
+
+  local rx = rxbuf:segment()
+  return readmsg(Rclunk, rx)
+end
+
 function _test()
   local msize, err = version()
   if err then
@@ -362,6 +378,16 @@ function _test()
   buf:layout{str = {0, #buf, 'string'}}
   perr(buf.str)
 
+  local err = clunk(g)
+  if err then
+    perr(err)
+    return
+  end
+  local err = open(g, 0)
+  if not err then
+    return
+  end
+  
   local h = newfid()
   err = walk(root, h, "/tmp/file000")
   if err then
