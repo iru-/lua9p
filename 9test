@@ -1,3 +1,8 @@
 #!/bin/sh
 
-(lua 9p.lua < /tmp/srv-cli) > /tmp/cli-srv
+if [ -z `which dialexec` ]; then
+	(lua 9p.lua < /tmp/srv-cli) > /tmp/cli-srv
+else
+	dialexec localhost:9999 lua 9p.lua
+fi
+

@@ -1,5 +1,9 @@
 #!/bin/sh
 
-rm -f /tmp/cli-srv /tmp/srv-cli
-mkfifo /tmp/cli-srv; mkfifo /tmp/srv-cli
-$HOME/Downloads/u9fs/u9fs -nz -a none -D </tmp/cli-srv >/tmp/srv-cli
+if [ -z `which listen1` ]; then
+	rm -f /tmp/cli-srv /tmp/srv-cli
+	mkfifo /tmp/cli-srv; mkfifo /tmp/srv-cli
+	$HOME/Downloads/u9fs/u9fs -nz -a none -D </tmp/cli-srv >/tmp/srv-cli
+else
+	listen1 'tcp!localhost!9999' $HOME/Downloads/u9fs/u9fs -nz -a none -D
+fi
