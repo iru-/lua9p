@@ -90,16 +90,6 @@ function putstr(to, s)
   return 2 + #s
 end
 
-function putsegment(to, from)
-  if #from > #to then return 0 end
-
-  local src = from:segment():layout{s = {0, #from, 's'}}
-  local dst = to:segment():layout{s = {0, #to, 's'}}
-
-  dst.s = src.s
-  return #from
-end
-
 function getstr(from)
   local p = from:segment()
   local len = p:layout{len = num9p(0, 2)}.len
@@ -297,7 +287,7 @@ function read(fid, offset, count)
   return nil, rx:segment(11, rx.count)
 end
 
-function write(fid, offset, buf)
+function write(fid, offset, seg)
   local LTwrite = data.layout{
                   fid    = num9p(7, 4),
                   offset = num9p(11, 8),
@@ -312,11 +302,11 @@ function write(fid, offset, buf)
   tx:layout(LTwrite)
   tx.fid    = fid.fid
   tx.offset = offset
-  tx.count  = #buf
-  local n = putsegment(tx:segment(23), buf)
+  tx.count  = #seg
 
-  n = putheader(tx, Twrite, 16 + n)
-  dio.write(tx, 0, n)
+  local n = putheader(tx, Twrite, 16 + #seg)
+  dio.write(tx, 0, n - #seg)
+  dio.write(seg, 0, #seg)
 
   local rx = rxbuf:segment()
   rx:layout(LRwrite)
