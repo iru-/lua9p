@@ -2,6 +2,39 @@ data = require "data"
 dio  = require "data_io"
 io   = require "io"
 
+-- message types
+Tversion = 100
+Rversion = 101
+Tauth    = 102
+Rauth    = 103
+Tattach  = 104
+Rattach  = 105
+Rerror   = 107
+Tflush   = 108
+Rflush   = 109
+Twalk    = 110
+Rwalk    = 111
+Topen    = 112
+Ropen    = 113
+Tcreate  = 114
+Rcreate  = 115
+Tread    = 116
+Rread    = 117
+Twrite   = 118
+Rwrite   = 119
+Tclunk   = 120
+Rclunk   = 121
+Tremove  = 122
+Rremove  = 123
+Tstat    = 124
+Rstat    = 125
+Twstat   = 126
+Rwstat   = 127
+Tmax     = 128
+
+-- io (Twrite/Rread) header size, i.e. minimum msize
+IOHEADSZ = 24
+
 fidfree   = nil
 fidactive = nil
 nextfid   = 0
@@ -13,9 +46,11 @@ function newfid()
     fidfree = f.next
   else
     f = {}
-    f.fid = nextfid;
-    nextfid = nextfid + 1;
+    f.fid = nextfid
+    f.qid = nil
     f.next = fidactive
+    
+    nextfid = nextfid + 1;
     fidactive = f
   end
 
@@ -33,6 +68,13 @@ end
 
 
 function perr(s) io.stderr:write(s .. "\n") end
+function pfid(f)
+  local s = "fid " .. f.fid
+  if f.qid then
+    s = s .. " qid { type = " .. f.qid.type .. ", version = " .. f.qid.version .. ", path = " .. f.qid.path .. "}"
+  end
+  perr(s)
+end
 
 -- Returns a 9P number in table format. Offset and size in bytes
 function num9p(offset, size)
@@ -55,12 +97,32 @@ function getstr(from)
   return p:layout{str = {2, len, 's'}}.str
 end
 
-function readmsg(to)
-  local p = to:segment():layout{size = num9p(0, 4)}
+function readmsg(type, to)
+  local p = to:segment():layout{size = num9p(0, 4), type = num9p(4, 1)}
 
   dio.read(to, 0, 4)
   dio.read(to, 4, p.size - 4)
-end 
+
+  if (p.type ~= type) then
+    if (p.type == Rerror) then
+      return getstr(p:segment(7))
+    else
+      return "Wrong response type " .. p.type .. ", expected " .. type
+    end
+  end
+  return nil
+end
+
+function getqid(buf)
+  local LQid = data.layout{
+                   type = num9p(0, 1),
+                   vers = num9p(1, 4),
+                   path = num9p(5, 8),
+  }
+
+  local p = buf:segment():layout(LQid)
+  return {type = p.type, version = p.vers, path = p.path}
+end
 
 function putheader(to, type, size)
   local Lheader = data.layout{
@@ -84,7 +146,7 @@ function version()
 
   local buf = data.new(19)
   buf:layout(LXversion)
-  buf.msize = 8192
+  buf.msize = 8192+IOHEADSZ
 
   putstr(buf:segment(11), "9P2000")
   putheader(buf, 100, 4 + 2 + 6)
@@ -93,8 +155,8 @@ function version()
   buf = data.new(8192)
   buf:layout(LXversion)
 
-  readmsg(buf)
-  return buf.msize
+  local err = readmsg(Rversion, buf)
+  return buf.msize, err
 end
 
 function attach(uname, aname)
@@ -103,29 +165,29 @@ function attach(uname, aname)
                    afid = num9p(11, 4),
   }
 
-  local LRattach = data.layout{
-                   qtype = num9p(7, 1),
-                   qvers = num9p(8, 4),
-                   qpath = num9p(12, 8),
-  }
-
   local tx = txbuf:segment()
   tx:layout(LTattach)
 
-  tx.fid  = newfid()
+  local fid = newfid()
+  tx.fid  = fid.fid
   tx.afid = -1
   local n = putstr(tx:segment(15), uname)
   n = n + putstr(tx:segment(15 + n), aname)
   
-  n = putheader(tx, 104, 8 + n)
+  n = putheader(tx, Tattach, 8 + n)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
-  rx:layout(LRattach)
-  readmsg(rx)
+
+  local err = readmsg(Rattach, rx)
+  if err then return err, nil end
+
+  fid.qid = getqid(rx:segment(7))
+  return nil, fid
 end
 
 -- name == nil clones ofid to nfid
+-- XXX we only support walking to a file at a time
 function walk(ofid, nfid, name)
   local LTwalk = data.layout{
                  fid    = num9p(7, 4),
@@ -142,8 +204,8 @@ function walk(ofid, nfid, name)
 
   local tx = txbuf:segment()
   tx:layout(LTwalk)
-  tx.fid    = ofid
-  tx.nfid   = nfid
+  tx.fid    = ofid.fid
+  tx.nfid   = nfid.fid
 
   local n = 0
   if (name) then
@@ -153,22 +215,88 @@ function walk(ofid, nfid, name)
     tx.nwname = 0
   end
 
-  n = putheader(tx, 110, 10 + n)
+  n = putheader(tx, Twalk, 10 + n)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
   rx:layout(LRwalk)
-  readmsg(rx)
+
+  local err = readmsg(Rwalk, rx)
+  if err then
+    return err
+  end
+
+  if (rx.nwqid == 0) then
+    nfid.qid = ofid.qid
+  else
+    nfid.qid = getqid(rx:segment(9))
+  end
+end
+
+function open(fid, mode)
+  local LTopen = data.layout{
+                 fid  = num9p(7, 4),
+                 mode = num9p(11, 1),
+  }
+
+  local LRopen = data.layout{
+                 size   = num9p(0, 4),
+                 type   = num9p(4, 1),
+                 tag    = num9p(5, 2),
+  }
+
+  local tx = txbuf:segment()
+  tx:layout(LTopen)
+  tx.fid  = fid.fid
+  tx.mode = mode
+
+  local n = putheader(tx, Topen, 5)
+  dio.write(tx, 0, n)
+
+  local rx = rxbuf:segment()
+  rx:layout(LRopen)
+  local err = readmsg(Ropen, rx)
+  if err then
+    return err
+  end
+
+  fid.qid = getqid(rx:segment(7))
+  return nil
 end
 
 function _test()
-   msize = version()
-   txbuf = data.new(msize)
-   rxbuf = data.new(msize)
-   attach("iru", "")
-   local f = newfid() 
-   walk(0, f, "/tmp")
-   walk(f, newfid())
+  local msize, err = version()
+  if err then
+    perr(err)
+    return
+  end
+  if msize < IOHEADSZ then
+    perr("short msize")
+    return
+  end
+
+  txbuf = data.new(msize)
+  rxbuf = data.new(msize)
+
+  err, root = attach("iru", "")
+  if err then
+    perr(err)
+    return
+  end
+  
+  pfid(root)
+  
+  local f, g = newfid(), newfid()
+  walk(root, f, "/tmp")
+  pfid(f)
+  walk(f, g)
+  pfid(g)
+  err = open(g)
+  if err then
+    perr(err)
+    return
+  end
+  pfid(g)
 end
 
 _test()
