@@ -339,20 +339,28 @@ function write(fid, offset, seg)
   return readmsg(Rwrite, rx)
 end
 
-function clunk(fid)
-  local LTclunk = data.layout{
-                  fid = num9p(7, 4),
+function clunkrm(type, fid)
+  local LTclunkrm = data.layout{
+                   fid = num9p(7, 4),
   }
-  
+
   local tx = txbuf:segment()
-  tx:layout(LTclunk)
+  tx:layout(LTclunkrm)
   tx.fid = fid.fid
 
-  local n = putheader(tx, Tclunk, 4)
+  local n = putheader(tx, type, 4)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
-  return readmsg(Rclunk, rx)
+  return readmsg(type+1, rx)
+end
+
+function clunk(fid)
+  return clunkrm(Tclunk, fid)
+end
+
+function remove(fid)
+  return clunkrm(Tremove, fid)
 end
 
 function _test()
@@ -428,6 +436,12 @@ function _test()
   perr("read " .. #buf .. " bytes")
   buf:layout{str = {0, #buf, 'string'}}
   perr(buf.str)
+
+  local err = remove(g)
+  if err then
+    perr(err)
+    return
+  end
 end
 
 _test()
