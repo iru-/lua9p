@@ -259,6 +259,32 @@ function open(fid, mode)
   return nil
 end
 
+function create(fid, name, perm, mode)
+  local tx = txbuf:segment()
+  local n = putstr(tx:segment(11), name)
+  
+  local LTcreate = data.layout{
+                   fid  = num9p(7, 4),
+                   perm = num9p(11 + n, 4),
+                   mode = num9p(11 + n + 4, 1),
+  }
+  
+  tx:layout(LTcreate)
+  tx.fid  = fid.fid
+  tx.perm = perm
+  tx.mode = mode
+
+  local n = putheader(tx, Tcreate, n + 9)
+  dio.write(tx, 0, n)
+
+  local rx = rxbuf:segment()
+  local err = readmsg(Rcreate, rx)
+  if err then return err end
+
+  fid.qid = getqid(rx:segment(7))
+  return nil
+end
+                   
 function read(fid, offset, count)
   local LTread = data.layout{
                  fid    = num9p(7, 4),
@@ -351,7 +377,7 @@ function _test()
 
   local f, g = newfid(), newfid()
 
-  err = walk(root, f, "/tmp/file")
+  err = walk(root, f, "/tmp")
   if err then
     perr(err)
     return
@@ -363,7 +389,32 @@ function _test()
     return
   end
 
-  err = open(g, 0)
+  err = create(g, "file", 420, 1)
+  if err then
+    perr(err)
+    return
+  end
+
+  buf = data.new("write test\n")
+  err = write(g, 0, buf)
+  if err then
+    perr(err)
+    return
+  end
+
+  local err = clunk(g)
+  if err then
+    perr(err)
+    return
+  end
+
+  local err = walk(root, g, "/tmp/file")
+  if err then
+    perr(err)
+    return
+  end
+
+  local err = open(g, 0)
   if err then
     perr(err)
     return
@@ -377,36 +428,6 @@ function _test()
   perr("read " .. #buf .. " bytes")
   buf:layout{str = {0, #buf, 'string'}}
   perr(buf.str)
-
-  local err = clunk(g)
-  if err then
-    perr(err)
-    return
-  end
-  local err = open(g, 0)
-  if not err then
-    return
-  end
-  
-  local h = newfid()
-  err = walk(root, h, "/tmp/file000")
-  if err then
-    perr(err)
-    return
-  end
-
-  err = open(h, 1)
-  if err then
-    perr(err)
-    return
-  end
-
-  buf = data.new("write test\n")
-  err = write(h, 0, buf)
-  if err then
-    perr(err)
-    return
-  end
 end
 
 _test()
