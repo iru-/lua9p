@@ -66,12 +66,11 @@ function tag()
   return 1
 end
 
-
 function perr(s) io.stderr:write(s .. "\n") end
 function pfid(f)
   local s = "fid " .. f.fid
   if f.qid then
-    s = s .. " qid { type = " .. f.qid.type .. ", version = " .. f.qid.version .. ", path = " .. f.qid.path .. "}"
+    s = s .. " qid {type = " .. f.qid.type .. ", version = " .. f.qid.version .. ", path = " .. f.qid.path .. "}"
   end
   perr(s)
 end
@@ -89,6 +88,16 @@ function putstr(to, s)
   p.len = #s
   p.s = s
   return 2 + #s
+end
+
+function putsegment(to, from)
+  if #from > #to then return 0 end
+
+  local src = from:segment():layout{s = {0, #from, 's'}}
+  local dst = to:segment():layout{s = {0, #to, 's'}}
+
+  dst.s = src.s
+  return #from
 end
 
 function getstr(from)
@@ -222,9 +231,7 @@ function walk(ofid, nfid, name)
   rx:layout(LRwalk)
 
   local err = readmsg(Rwalk, rx)
-  if err then
-    return err
-  end
+  if err then return err end
 
   if (rx.nwqid == 0) then
     nfid.qid = ofid.qid
@@ -256,12 +263,64 @@ function open(fid, mode)
   local rx = rxbuf:segment()
   rx:layout(LRopen)
   local err = readmsg(Ropen, rx)
-  if err then
-    return err
-  end
+  if err then return err end
 
   fid.qid = getqid(rx:segment(7))
   return nil
+end
+
+function read(fid, offset, count)
+  local LTread = data.layout{
+                 fid    = num9p(7, 4),
+                 offset = num9p(11, 8),
+                 count  = num9p(19, 4),
+  }
+  
+  local LRread = data.layout{
+                 count = num9p(7, 4)
+  }
+
+  local tx = txbuf:segment()
+  tx:layout(LTread)
+  tx.fid    = fid.fid
+  tx.offset = offset
+  tx.count  = count
+
+  local n = putheader(tx, Tread, 16)
+  dio.write(tx, 0, n)
+
+  local rx = rxbuf:segment()
+  rx:layout(LRread)
+  local err = readmsg(Rread, rx)
+  if err then return err, nil end
+
+  return nil, rx:segment(11, rx.count)
+end
+
+function write(fid, offset, buf)
+  local LTwrite = data.layout{
+                  fid    = num9p(7, 4),
+                  offset = num9p(11, 8),
+                  count  = num9p(19, 4),
+  }
+
+  local LRwrite = data.layout{
+                 count = num9p(7, 4)
+  }
+ 
+  local tx = txbuf:segment()
+  tx:layout(LTwrite)
+  tx.fid    = fid.fid
+  tx.offset = offset
+  tx.count  = #buf
+  local n = putsegment(tx:segment(23), buf)
+
+  n = putheader(tx, Twrite, 16 + n)
+  dio.write(tx, 0, n)
+
+  local rx = rxbuf:segment()
+  rx:layout(LRwrite)
+  return readmsg(Rwrite, rx)
 end
 
 function _test()
@@ -283,20 +342,55 @@ function _test()
     perr(err)
     return
   end
-  
-  pfid(root)
-  
+
   local f, g = newfid(), newfid()
-  walk(root, f, "/tmp")
-  pfid(f)
-  walk(f, g)
-  pfid(g)
-  err = open(g)
+
+  err = walk(root, f, "/tmp/file")
   if err then
     perr(err)
     return
   end
-  pfid(g)
+
+  err = walk(f, g)
+  if err then
+    perr(err)
+    return
+  end
+
+  err = open(g, 0)
+  if err then
+    perr(err)
+    return
+  end
+
+  local err, buf = read(g, 0, 16)
+  if err then
+    perr(err)
+    return
+  end
+  perr("read " .. #buf .. " bytes")
+  buf:layout{str = {0, #buf, 'string'}}
+  perr(buf.str)
+
+  local h = newfid()
+  err = walk(root, h, "/tmp/file000")
+  if err then
+    perr(err)
+    return
+  end
+
+  err = open(h, 1)
+  if err then
+    perr(err)
+    return
+  end
+
+  buf = data.new("write test\n")
+  err = write(h, 0, buf)
+  if err then
+    perr(err)
+    return
+  end
 end
 
 _test()
