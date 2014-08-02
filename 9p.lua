@@ -126,8 +126,9 @@ function readmsg(type, to)
   return nil
 end
 
--- XXX check overflow!
 function getqid(buf)
+  if #buf < 13 then return nil end
+
   local LQid = data.layout{
                    type = num9p(0, 1),
                    vers = num9p(1, 4),
@@ -197,11 +198,15 @@ function attach(uname, aname)
   if err then return err, nil end
 
   fid.qid = getqid(rx:segment(7))
+  if not fid.qid then
+    return "overflow copying qid", nil
+  end
+
   return nil, fid
 end
 
 -- name == nil clones ofid to nfid
--- XXX we only support walking to a file at a time
+-- N.B. we only support walking to a file at a time
 function walk(ofid, nfid, name)
   local LTwalk = data.layout{
                  fid    = num9p(7, 4),
@@ -243,6 +248,10 @@ function walk(ofid, nfid, name)
   else
     nfid.qid = getqid(rx:segment(9))
   end
+  
+  if not nfid.qid then
+    return "overflow copying qid"
+  end
 end
 
 function open(fid, mode)
@@ -271,6 +280,10 @@ function open(fid, mode)
   if err then return err end
 
   fid.qid = getqid(rx:segment(7))
+  if not fid.qid then
+    return "overflow copying qid"
+  end
+
   return nil
 end
 
@@ -297,6 +310,10 @@ function create(fid, name, perm, mode)
   if err then return err end
 
   fid.qid = getqid(rx:segment(7))
+  if not fid.qid then
+    return "overflow copying qid"
+  end
+
   return nil
 end
                    
@@ -396,6 +413,10 @@ function getstat(seg)
   st.type   = p.type
   st.dev    = p.dev
   st.qid    = getqid(seg:segment(8))
+  if not st.qid then
+    return nil
+  end
+
   st.mode   = p.mode
   st.atime  = p.atime
   st.mtime  = p.mtime
