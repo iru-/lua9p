@@ -470,7 +470,7 @@ function _test()
     return
   end
 
-  buf = data.new("write test\n")
+  buf = data.new("test ok\n")
   err = write(g, 0, buf)
   if err then
     perrnl(err)
@@ -488,8 +488,6 @@ function _test()
     perrnl(err)
     return
   end
-
-  pfid(g)
 
   local err = open(g, 0)
   if err then
@@ -511,15 +509,18 @@ function _test()
     return
   end
 
-  perrnl("read " .. #buf .. " bytes")
-  buf:layout{str = {0, #buf, 'string'}}
-  perr(buf.str)
-
   local err = remove(g)
   if err then
     perrnl(err)
     return
   end
+
+  buf:layout{str = {0, #buf, 'string'}}
+  perr(buf.str)
+
+  clunk(g)
+  clunk(f)
+  clunk(root)
 end
 
 _test()
