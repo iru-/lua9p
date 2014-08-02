@@ -66,13 +66,27 @@ function tag()
   return 1
 end
 
-function perr(s) io.stderr:write(s .. "\n") end
+function perr(s) io.stderr:write(s) end
+function perrnl(s) perr(s .. "\n") end
+
+function pqid(q)
+  perr("(" .. q.path .. " " .. q.version .. " " .. q.type .. ")")
+end
+
 function pfid(f)
-  local s = "fid " .. f.fid
+  perr("fid " .. f.fid .. " ")
   if f.qid then
-    s = s .. " qid {type = " .. f.qid.type .. ", version = " .. f.qid.version .. ", path = " .. f.qid.path .. "}"
+    pqid(f.qid)
   end
-  perr(s)
+  perr("\n")
+end
+
+function pstat(st)
+  perr("type " .. st.type .. " dev " .. st.dev .. " qid ")
+  pqid(st.qid)
+  perr(" mode " .. st.mode .. " atime " .. st.atime .. " mtime " .. st.mtime .. " length " .. st.length)
+  perr(" name " .. st.name .. " uid " .. st.uid .. " gid " .. st.gid .. " muid " .. st.muid)
+  perr("\n")
 end
 
 -- Returns a 9P number in table format. Offset and size in bytes
@@ -93,7 +107,7 @@ end
 function getstr(from)
   local p = from:segment()
   local len = p:layout{len = num9p(0, 2)}.len
-  return p:layout{str = {2, len, 's'}}.str
+  return p:layout{str = {2, len, 's'}}.str or ""
 end
 
 function readmsg(type, to)
@@ -112,6 +126,7 @@ function readmsg(type, to)
   return nil
 end
 
+-- XXX check overflow!
 function getqid(buf)
   local LQid = data.layout{
                    type = num9p(0, 1),
@@ -363,14 +378,66 @@ function remove(fid)
   return clunkrm(Tremove, fid)
 end
 
+function getstat(seg)
+  local Lstat = data.layout{
+                size   = num9p(0, 2),
+                type   = num9p(2, 2),
+                dev    = num9p(4, 4),
+                qid    = num9p(8, 13),
+                mode   = num9p(21, 4),
+                atime  = num9p(25, 4),
+                mtime  = num9p(29, 4),
+                length = num9p(33, 8),
+  }
+
+  local p = seg:segment():layout(Lstat)
+  local st = {}
+
+  st.type   = p.type
+  st.dev    = p.dev
+  st.qid    = getqid(seg:segment(8))
+  st.mode   = p.mode
+  st.atime  = p.atime
+  st.mtime  = p.mtime
+  st.length = p.length
+  st.name   = getstr(seg:segment(41))
+  st.uid    = getstr(seg:segment(41 + 2 + #st.name))
+  st.gid    = getstr(seg:segment(41 + 2 + #st.name + 2 + #st.uid))
+  st.muid   = getstr(seg:segment(41 + 2 + #st.name + 2 + #st.uid + 2 + #st.gid))
+
+  return st
+end
+
+function stat(fid)
+  local LTstat = data.layout{
+                 fid = num9p(7, 4),
+  }
+
+  local tx = txbuf:segment()
+  tx:layout(LTstat)
+  tx.fid = fid.fid
+
+  local n = putheader(tx, Tstat, 4)
+  dio.write(tx, 0, n)
+  
+  local rx = rxbuf:segment()
+  rx:layout(LRstat)
+  local err = readmsg(Rstat, rx)
+  if err then
+    return err, nil
+  end
+
+  return nil, getstat(rx:segment(9))
+end
+
 function _test()
   local msize, err = version()
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
   if msize < IOHEADSZ then
-    perr("short msize")
+    perrnl("short msize")
     return
   end
 
@@ -379,7 +446,7 @@ function _test()
 
   err, root = attach("iru", "")
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
 
@@ -387,59 +454,70 @@ function _test()
 
   err = walk(root, f, "/tmp")
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
 
   err = walk(f, g)
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
 
   err = create(g, "file", 420, 1)
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
 
   buf = data.new("write test\n")
   err = write(g, 0, buf)
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
 
   local err = clunk(g)
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
 
   local err = walk(root, g, "/tmp/file")
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
+
+  pfid(g)
 
   local err = open(g, 0)
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
 
-  local err, buf = read(g, 0, 16)
+  local err, st = stat(g)
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
-  perr("read " .. #buf .. " bytes")
+
+  local n = st.length < msize-IOHEADSZ and st.length or msize-IOHEADSZ
+
+  local err, buf = read(g, 0, n)
+  if err then
+    perrnl(err)
+    return
+  end
+
+  perrnl("read " .. #buf .. " bytes")
   buf:layout{str = {0, #buf, 'string'}}
   perr(buf.str)
 
   local err = remove(g)
   if err then
-    perr(err)
+    perrnl(err)
     return
   end
 end
