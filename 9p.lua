@@ -371,7 +371,7 @@ function write(fid, offset, seg)
   tx.offset = offset
   tx.count  = #seg
 
-  local n = putheader(tx, Twrite, 16 + #seg)
+  local n = putheader(tx, Twrite, FIDSZ + 8 + 4 + #seg)
   dio.write(tx, 0, n - #seg)
   dio.write(seg, 0, #seg)
 
