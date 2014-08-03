@@ -32,8 +32,11 @@ Twstat   = 126
 Rwstat   = 127
 Tmax     = 128
 
--- io (Twrite/Rread) header size, i.e. minimum msize
-IOHEADSZ = 24
+
+HEADSZ   = 7
+FIDSZ    = 4
+QIDSZ    = 13
+IOHEADSZ = 24    -- io (Twrite/Rread) header size, i.e. minimum msize
 
 fidfree   = nil
 fidactive = nil
@@ -118,7 +121,7 @@ function readmsg(type, to)
 
   if (p.type ~= type) then
     if (p.type == Rerror) then
-      return getstr(p:segment(7))
+      return getstr(p:segment(HEADSZ))
     else
       return "Wrong response type " .. p.type .. ", expected " .. type
     end
@@ -127,7 +130,7 @@ function readmsg(type, to)
 end
 
 function getqid(buf)
-  if #buf < 13 then return nil end
+  if #buf < QIDSZ then return nil end
 
   local LQid = data.layout{
                    type = num9p(0, 1),
@@ -148,7 +151,7 @@ function putheader(to, type, size)
 
   local p = to:segment():layout(Lheader)
 
-  p.size = 7 + size
+  p.size = HEADSZ + size
   p.type = type
   p.tag  = tag()
   return p.size
@@ -156,16 +159,16 @@ end
 
 function version()
   local LXversion = data.layout{
-                    msize = num9p(7, 4),
+                    msize = num9p(HEADSZ, 4),
   }
 
   local buf = data.new(19)
   buf:layout(LXversion)
   buf.msize = 8192+IOHEADSZ
 
-  putstr(buf:segment(11), "9P2000")
-  putheader(buf, 100, 4 + 2 + 6)
-  dio.write(buf, 0, 19)
+  local n = putstr(buf:segment(HEADSZ + 4), "9P2000")
+  n = putheader(buf, 100, 4 + n)
+  dio.write(buf, 0, n)
 
   buf = data.new(8192)
   buf:layout(LXversion)
@@ -176,7 +179,7 @@ end
 
 function attach(uname, aname)
   local LTattach = data.layout{
-                   fid  = num9p(7, 4),
+                   fid  = num9p(HEADSZ, 4),
                    afid = num9p(11, 4),
   }
 
@@ -186,10 +189,10 @@ function attach(uname, aname)
   local fid = newfid()
   tx.fid  = fid.fid
   tx.afid = -1
-  local n = putstr(tx:segment(15), uname)
-  n = n + putstr(tx:segment(15 + n), aname)
+  local n = putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ), uname)
+  n = n + putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ + n), aname)
   
-  n = putheader(tx, Tattach, 8 + n)
+  n = putheader(tx, Tattach, FIDSZ + FIDSZ + n)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
@@ -197,7 +200,7 @@ function attach(uname, aname)
   local err = readmsg(Rattach, rx)
   if err then return err, nil end
 
-  fid.qid = getqid(rx:segment(7))
+  fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
     return "overflow copying qid", nil
   end
@@ -222,29 +225,26 @@ end
 -- path == nil clones ofid to nfid
 function walk(ofid, nfid, path)
   local LTwalk = data.layout{
-                 fid    = num9p(7, 4),
-                 nfid   = num9p(11, 4),
-                 nwname = num9p(15, 2),
+                 fid    = num9p(HEADSZ, FIDSZ),
+                 newfid = num9p(HEADSZ + FIDSZ, FIDSZ),
+                 nwname = num9p(HEADSZ + FIDSZ + FIDSZ, 2),
   }
 
   local LRwalk = data.layout{
-                 size   = num9p(0, 4),
-                 type   = num9p(4, 1),
-                 tag    = num9p(5, 2),
-                 nwqid  = num9p(7, 2),
+                 nwqid  = num9p(HEADSZ, 2),
   }
 
   local tx = txbuf:segment()
   tx:layout(LTwalk)
   tx.fid    = ofid.fid
-  tx.nfid   = nfid.fid
+  tx.newfid = nfid.fid
 
   local n = 0
   if (path) then
     local names = breakpath(path)
     tx.nwname = #names
     for i = 1, #names do
-      n = n + putstr(tx:segment(17 + n), names[i])
+      n = n + putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ + 2 + n), names[i])
     end
   else
     tx.nwname = 0
@@ -262,7 +262,7 @@ function walk(ofid, nfid, path)
   if (rx.nwqid == 0) then
     nfid.qid = ofid.qid
   elseif (rx.nwqid == tx.nwname) then
-    nfid.qid = getqid(rx:segment(9 + (rx.nwqid-1)*13))
+    nfid.qid = getqid(rx:segment(9 + (rx.nwqid-1)*QIDSZ))
   end
   
   if not nfid.qid then
@@ -272,14 +272,8 @@ end
 
 function open(fid, mode)
   local LTopen = data.layout{
-                 fid  = num9p(7, 4),
+                 fid  = num9p(HEADSZ, 4),
                  mode = num9p(11, 1),
-  }
-
-  local LRopen = data.layout{
-                 size   = num9p(0, 4),
-                 type   = num9p(4, 1),
-                 tag    = num9p(5, 2),
   }
 
   local tx = txbuf:segment()
@@ -291,11 +285,10 @@ function open(fid, mode)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
-  rx:layout(LRopen)
   local err = readmsg(Ropen, rx)
   if err then return err end
 
-  fid.qid = getqid(rx:segment(7))
+  fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
     return "overflow copying qid"
   end
@@ -308,7 +301,7 @@ function create(fid, name, perm, mode)
   local n = putstr(tx:segment(11), name)
   
   local LTcreate = data.layout{
-                   fid  = num9p(7, 4),
+                   fid  = num9p(HEADSZ, 4),
                    perm = num9p(11 + n, 4),
                    mode = num9p(11 + n + 4, 1),
   }
@@ -325,7 +318,7 @@ function create(fid, name, perm, mode)
   local err = readmsg(Rcreate, rx)
   if err then return err end
 
-  fid.qid = getqid(rx:segment(7))
+  fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
     return "overflow copying qid"
   end
@@ -335,13 +328,13 @@ end
                    
 function read(fid, offset, count)
   local LTread = data.layout{
-                 fid    = num9p(7, 4),
-                 offset = num9p(11, 8),
-                 count  = num9p(19, 4),
+                 fid    = num9p(HEADSZ, FIDSZ),
+                 offset = num9p(HEADSZ + FIDSZ, 8),
+                 count  = num9p(HEADSZ + FIDSZ + 8, 4),
   }
   
   local LRread = data.layout{
-                 count = num9p(7, 4)
+                 count = num9p(HEADSZ, 4)
   }
 
   local tx = txbuf:segment()
@@ -350,7 +343,7 @@ function read(fid, offset, count)
   tx.offset = offset
   tx.count  = count
 
-  local n = putheader(tx, Tread, 16)
+  local n = putheader(tx, Tread, FIDSZ + 8 + 4)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
@@ -358,18 +351,18 @@ function read(fid, offset, count)
   local err = readmsg(Rread, rx)
   if err then return err, nil end
 
-  return nil, rx:segment(11, rx.count)
+  return nil, rx:segment(HEADSZ + 4, rx.count)
 end
 
 function write(fid, offset, seg)
   local LTwrite = data.layout{
-                  fid    = num9p(7, 4),
-                  offset = num9p(11, 8),
-                  count  = num9p(19, 4),
+                  fid    = num9p(HEADSZ, 4),
+                  offset = num9p(HEADSZ + FIDSZ, 8),
+                  count  = num9p(HEADSZ + FIDSZ + 8, 4),
   }
 
   local LRwrite = data.layout{
-                 count = num9p(7, 4)
+                 count = num9p(HEADSZ, 4)
   }
  
   local tx = txbuf:segment()
@@ -389,14 +382,14 @@ end
 
 function clunkrm(type, fid)
   local LTclunkrm = data.layout{
-                   fid = num9p(7, 4),
+                   fid = num9p(HEADSZ, FIDSZ),
   }
 
   local tx = txbuf:segment()
   tx:layout(LTclunkrm)
   tx.fid = fid.fid
 
-  local n = putheader(tx, type, 4)
+  local n = putheader(tx, type, FIDSZ)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
@@ -416,7 +409,7 @@ function getstat(seg)
                 size   = num9p(0, 2),
                 type   = num9p(2, 2),
                 dev    = num9p(4, 4),
-                qid    = num9p(8, 13),
+                qid    = num9p(8, QIDSZ),
                 mode   = num9p(21, 4),
                 atime  = num9p(25, 4),
                 mtime  = num9p(29, 4),
@@ -447,7 +440,7 @@ end
 
 function stat(fid)
   local LTstat = data.layout{
-                 fid = num9p(7, 4),
+                 fid = num9p(HEADSZ, 4),
   }
 
   local tx = txbuf:segment()
@@ -458,13 +451,12 @@ function stat(fid)
   dio.write(tx, 0, n)
   
   local rx = rxbuf:segment()
-  rx:layout(LRstat)
   local err = readmsg(Rstat, rx)
   if err then
     return err, nil
   end
 
-  return nil, getstat(rx:segment(9))
+  return nil, getstat(rx:segment(HEADSZ + 2))
 end
 
 function _test()
