@@ -205,9 +205,22 @@ function attach(uname, aname)
   return nil, fid
 end
 
--- name == nil clones ofid to nfid
--- N.B. we only support walking to a file at a time
-function walk(ofid, nfid, name)
+function breakpath(path)
+  local t = {}
+  local k = 1
+  local i = 1
+
+  while i < #path do
+    local s, es = string.find(path, "[^/]+", i)
+    t[k] = string.sub(path, s, es)
+    k = k + 1
+    i = es + 1
+  end
+  return t
+end
+
+-- path == nil clones ofid to nfid
+function walk(ofid, nfid, path)
   local LTwalk = data.layout{
                  fid    = num9p(7, 4),
                  nfid   = num9p(11, 4),
@@ -227,9 +240,12 @@ function walk(ofid, nfid, name)
   tx.nfid   = nfid.fid
 
   local n = 0
-  if (name) then
-    tx.nwname = 1
-    n = putstr(tx:segment(17), name)
+  if (path) then
+    local names = breakpath(path)
+    tx.nwname = #names
+    for i = 1, #names do
+      n = n + putstr(tx:segment(17 + n), names[i])
+    end
   else
     tx.nwname = 0
   end
@@ -245,8 +261,8 @@ function walk(ofid, nfid, name)
 
   if (rx.nwqid == 0) then
     nfid.qid = ofid.qid
-  else
-    nfid.qid = getqid(rx:segment(9))
+  elseif (rx.nwqid == tx.nwname) then
+    nfid.qid = getqid(rx:segment(9 + (rx.nwqid-1)*13))
   end
   
   if not nfid.qid then
@@ -537,7 +553,7 @@ function _test()
   end
 
   buf:layout{str = {0, #buf, 'string'}}
-  perr(buf.str)
+  perr(buf.str or "")
 
   clunk(g)
   clunk(f)
