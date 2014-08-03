@@ -377,7 +377,9 @@ function write(fid, offset, seg)
 
   local rx = rxbuf:segment()
   rx:layout(LRwrite)
-  return readmsg(Rwrite, rx)
+  local err = readmsg(Rwrite, rx)
+  if err then return err, -1 end
+  return nil, rx.count
 end
 
 function clunkrm(type, fid)
@@ -500,9 +502,12 @@ function _test()
   end
 
   buf = data.new("test ok\n")
-  err = write(g, 0, buf)
+  local err, n = write(g, 0, buf)
   if err then
     perrnl(err)
+    return
+  elseif n ~= #buf then
+    perrnl("expected to write " .. #buf .. " but wrote " .. n)
     return
   end
 
