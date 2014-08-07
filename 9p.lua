@@ -399,7 +399,7 @@ function clunkrm(type, fid)
 
   local rx = rxbuf:segment()
   local err = readmsg(type+1, rx)
-  if err return err end
+  if err then return err end
 
   freefid(fid)
   return nil
