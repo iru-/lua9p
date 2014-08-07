@@ -65,8 +65,11 @@ function freefid(f)
   fidfree = f
 end
 
+curtag = 65535
 function tag()
-  return 1
+  local t = curtag
+  curtag = (curtag + 1) % 65535
+  return t
 end
 
 function perr(s) io.stderr:write(s) end
@@ -395,7 +398,11 @@ function clunkrm(type, fid)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
-  return readmsg(type+1, rx)
+  local err = readmsg(type+1, rx)
+  if err return err end
+
+  freefid(fid)
+  return nil
 end
 
 function clunk(fid)
