@@ -356,15 +356,19 @@ function walk(ofid, nfid, path)
     return err
   end
 
-  if (rx.nwqid == 0) then
+  -- clone succeded
+  if (rx.nwqid == 0 and not path) then
     nfid.qid = ofid.qid
-  elseif (rx.nwqid == tx.nwname) then
-    nfid.qid = getqid(rx:segment(HEADSZ + 2 + (rx.nwqid-1)*QIDSZ))
+    return nil
   end
 
-  if not nfid.qid then
-    return "walk: file '" .. path .. "' not found"
+  -- walk succeded
+  if (rx.nwqid == tx.nwname) then
+    nfid.qid = getqid(rx:segment(HEADSZ + 2 + (rx.nwqid-1)*QIDSZ))
+    return nil
   end
+
+  return "walk: file '" .. path .. "' not found"
 end
 
 function open(fid, mode)
@@ -610,6 +614,12 @@ function _test()
   local err = clunk(g)
   if err then
     perrnl(err)
+    return
+  end
+
+  local err = walk(root, g, "/tmp/.lua9p.non.existant..")
+  if not err then
+    perrnl("test: succeded in walking to non-existing file")
     return
   end
 
