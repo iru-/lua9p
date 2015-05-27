@@ -5,4 +5,10 @@ Lua9p is a 9P client written in Lua. It depends on [luadata](https://github.com/
 
 ## Build
 
-Type ```make``` to build data_io.so.
+Type ```LUADATA=path/to/luadata make``` to build data_io.so.
+
+## TODO
+
+* wstat
+* auth
+
