@@ -95,15 +95,22 @@ function pstat(st)
   perr("\n")
 end
 
+
 -- Returns a 9P number in table format. Offset and size in bytes
 function num9p(offset, size)
   return {offset*8, size*8, 'number', 'le'}
 end
 
 function putstr(to, s)
-  if #s > #to - 2 then return 0 end
+  if #s > #to - 2 then
+    return 0
+  end
 
-  local p = to:segment():layout{len = num9p(0, 2), s = {2, #s, 's'}}
+  local p = to:segment()
+  p:layout{
+    len = num9p(0, 2),
+    s   = {2, #s, 's'},
+  }
 
   p.len = #s
   p.s = s
@@ -111,13 +118,18 @@ function putstr(to, s)
 end
 
 function getstr(from)
-  local p = from:segment()
-  local len = p:layout{len = num9p(0, 2)}.len
-  return p:layout{str = {2, len, 's'}}.str or ""
+  local p = from:segment():layout{len = num9p(0, 2)}
+  p:layout{str = {2, p.len, 's'}}
+
+  return p.str or ""
 end
 
 function readmsg(type, to)
-  local p = to:segment():layout{size = num9p(0, 4), type = num9p(4, 1)}
+  local p = to:segment()
+  p:layout{
+    size = num9p(0, 4),
+    type = num9p(4, 1),
+  }
 
   dio.read(to, 0, 4)
   dio.read(to, 4, p.size - 4)
@@ -132,47 +144,51 @@ function readmsg(type, to)
   return nil
 end
 
-function getqid(buf)
-  if #buf < QIDSZ then return nil end
+LQid = data.layout{
+       type    = num9p(0, 1),
+       version = num9p(1, 4),
+       path    = num9p(5, 8),
+}
 
-  local LQid = data.layout{
-                   type    = num9p(0, 1),
-                   version = num9p(1, 4),
-                   path    = num9p(5, 8),
-  }
+function getqid(from)
+  if #from < QIDSZ then
+    return nil
+  end
 
-  local p = buf:segment():layout(LQid)
-  return {type = p.type, version = p.version, path = p.path}
+  local p = from:segment():layout(LQid)
+  local qid = {}
+
+  qid.type    = p.type
+  qid.version = p.version
+  qid.path    = p.path
+
+  return qid
 end
 
 function putqid(to, qid)
-  if #to < QIDSZ then return nil end
+  if #to < QIDSZ then
+    return nil
+  end
 
-  local LQid = data.layout{
-                   type    = num9p(0, 1),
-                   version = num9p(1, 4),
-                   path    = num9p(5, 8),
-  }
   local p = to:segment():layout(LQid)
-
   p.type    = qid.type
   p.version = qid.version
   p.path    = qid.path
   return to
 end
 
-function getstat(seg)
-  local Lstat = data.layout{
-                size   = num9p(0, 2),
-                type   = num9p(2, 2),
-                dev    = num9p(4, 4),
-                qid    = num9p(8, QIDSZ),
-                mode   = num9p(21, 4),
-                atime  = num9p(25, 4),
-                mtime  = num9p(29, 4),
-                length = num9p(33, 8),
-  }
+Lstat = data.layout{
+        size   = num9p(0,  2),
+        type   = num9p(2,  2),
+        dev    = num9p(4,  4),
+        qid    = num9p(8,  QIDSZ),
+        mode   = num9p(21, 4),
+        atime  = num9p(25, 4),
+        mtime  = num9p(29, 4),
+        length = num9p(33, 8),
+}
 
+function getstat(seg)
   local p = seg:segment():layout(Lstat)
   local st = {}
 
@@ -197,24 +213,15 @@ function getstat(seg)
 end
 
 function putstat(to, st)
-  local Lstat = data.layout{
-                size   = num9p(0, 2),
-                type   = num9p(2, 2),
-                dev    = num9p(4, 4),
-                qid    = num9p(8, QIDSZ),
-                mode   = num9p(21, 4),
-                atime  = num9p(25, 4),
-                mtime  = num9p(29, 4),
-                length = num9p(33, 8),
-  }
-
   local p = to:segment():layout(Lstat)
 
   p.size   = st.size
   p.type   = st.type
   p.dev    = st.dev
 
-  if not putqid(to:segment(8), st.qid) then return nil end
+  if not putqid(to:segment(8), st.qid) then
+    return nil
+  end
 
   p.mode   = st.mode
   p.atime  = st.atime
@@ -224,14 +231,15 @@ function putstat(to, st)
   putstr(to:segment(41 + 2 + #st.name), st.uid)
   putstr(to:segment(41 + 2 + #st.name + 2 + #st.uid), st.gid)
   putstr(to:segment(41 + 2 + #st.name + 2 + #st.uid + 2 + #st.gid), st.muid)
+
   return to
 end
 
 function putheader(to, type, size)
   local Lheader = data.layout{
-                    size = num9p(0, 4),
-                    type = num9p(4, 1),
-                    tag  = num9p(5, 2),
+                  size = num9p(0, 4),
+                  type = num9p(4, 1),
+                  tag  = num9p(5, 2),
   }
 
   local p = to:segment():layout(Lheader)
@@ -253,7 +261,7 @@ function version()
   buf.msize = 8192+IOHEADSZ
 
   local n = putstr(buf:segment(HEADSZ + 4), "9P2000")
-  n = putheader(buf, 100, 4 + n)
+  n = putheader(buf, Tversion, 4 + n)
   dio.write(buf, 0, n)
 
   buf = data.new(8192)
@@ -265,8 +273,8 @@ end
 
 function attach(uname, aname)
   local LTattach = data.layout{
-                   fid  = num9p(HEADSZ, FIDSZ),
-                   afid = num9p(11, 4),
+                   fid  = num9p(HEADSZ,          FIDSZ),
+                   afid = num9p(HEADSZ + FIDSZ,  4),
   }
 
   local tx = txbuf:segment()
@@ -282,9 +290,10 @@ function attach(uname, aname)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
-
   local err = readmsg(Rattach, rx)
-  if err then return err, nil end
+  if err then
+    return err, nil
+  end
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
@@ -311,9 +320,9 @@ end
 -- path == nil clones ofid to nfid
 function walk(ofid, nfid, path)
   local LTwalk = data.layout{
-                 fid    = num9p(HEADSZ, FIDSZ),
-                 newfid = num9p(HEADSZ + FIDSZ, FIDSZ),
-                 nwname = num9p(HEADSZ + FIDSZ + FIDSZ, 2),
+                 fid    = num9p(HEADSZ,                  FIDSZ),
+                 newfid = num9p(HEADSZ + FIDSZ,          FIDSZ),
+                 nwname = num9p(HEADSZ + FIDSZ + FIDSZ,  2),
   }
 
   local LRwalk = data.layout{
@@ -343,14 +352,16 @@ function walk(ofid, nfid, path)
   rx:layout(LRwalk)
 
   local err = readmsg(Rwalk, rx)
-  if err then return err end
+  if err then
+    return err
+  end
 
   if (rx.nwqid == 0) then
     nfid.qid = ofid.qid
   elseif (rx.nwqid == tx.nwname) then
     nfid.qid = getqid(rx:segment(HEADSZ + 2 + (rx.nwqid-1)*QIDSZ))
   end
-  
+
   if not nfid.qid then
     return "walk: file '" .. path .. "' not found"
   end
@@ -358,8 +369,8 @@ end
 
 function open(fid, mode)
   local LTopen = data.layout{
-                 fid  = num9p(HEADSZ, FIDSZ),
-                 mode = num9p(11, 1),
+                 fid  = num9p(HEADSZ,          FIDSZ),
+                 mode = num9p(HEADSZ + FIDSZ,  1),
   }
 
   local tx = txbuf:segment()
@@ -387,9 +398,9 @@ function create(fid, name, perm, mode)
   local n = putstr(tx:segment(11), name)
   
   local LTcreate = data.layout{
-                   fid  = num9p(HEADSZ, FIDSZ),
-                   perm = num9p(11 + n, 4),
-                   mode = num9p(11 + n + 4, 1),
+                   fid  = num9p(HEADSZ,                  FIDSZ),
+                   perm = num9p(HEADSZ + FIDSZ + n,      4),
+                   mode = num9p(HEADSZ + FIDSZ + n + 4,  1),
   }
   
   tx:layout(LTcreate)
@@ -414,9 +425,9 @@ end
                    
 function read(fid, offset, count)
   local LTread = data.layout{
-                 fid    = num9p(HEADSZ, FIDSZ),
-                 offset = num9p(HEADSZ + FIDSZ, 8),
-                 count  = num9p(HEADSZ + FIDSZ + 8, 4),
+                 fid    = num9p(HEADSZ,              FIDSZ),
+                 offset = num9p(HEADSZ + FIDSZ,      8),
+                 count  = num9p(HEADSZ + FIDSZ + 8,  4),
   }
   
   local LRread = data.layout{
@@ -442,9 +453,9 @@ end
 
 function write(fid, offset, seg)
   local LTwrite = data.layout{
-                  fid    = num9p(HEADSZ, FIDSZ),
-                  offset = num9p(HEADSZ + FIDSZ, 8),
-                  count  = num9p(HEADSZ + FIDSZ + 8, 4),
+                  fid    = num9p(HEADSZ,              FIDSZ),
+                  offset = num9p(HEADSZ + FIDSZ,      8),
+                  count  = num9p(HEADSZ + FIDSZ + 8,  4),
   }
 
   local LRwrite = data.layout{
@@ -519,8 +530,8 @@ end
 
 function wstat(fid, st)
   local LTwstat = data.layout{
-                 fid    = num9p(HEADSZ, FIDSZ),
-                 stsize = num9p(HEADSZ + FIDSZ, 2),
+                 fid    = num9p(HEADSZ,          FIDSZ),
+                 stsize = num9p(HEADSZ + FIDSZ,  2),
   }
 
   local tx = txbuf:segment()
@@ -629,7 +640,6 @@ function _test()
   end
 
   n = st.length < msize-IOHEADSZ and st.length or msize-IOHEADSZ
-  perrnl(#err)
 
   err, buf = read(g, 0, n)
   if err then
