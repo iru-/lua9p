@@ -336,7 +336,7 @@ function walk(ofid, nfid, path)
     tx.nwname = 0
   end
 
-  n = putheader(tx, Twalk, 10 + n)
+  n = putheader(tx, Twalk, FIDSZ + FIDSZ + 2 + n)
   dio.write(tx, 0, n)
 
   local rx = rxbuf:segment()
@@ -348,7 +348,7 @@ function walk(ofid, nfid, path)
   if (rx.nwqid == 0) then
     nfid.qid = ofid.qid
   elseif (rx.nwqid == tx.nwname) then
-    nfid.qid = getqid(rx:segment(9 + (rx.nwqid-1)*QIDSZ))
+    nfid.qid = getqid(rx:segment(HEADSZ + 2 + (rx.nwqid-1)*QIDSZ))
   end
   
   if not nfid.qid then
@@ -543,6 +543,7 @@ function wstat(fid, st)
   return readmsg(Rwstat, rx)
 end
 
+-- TODO: local vars should be local
 function _test()
   local msize, err = version()
   if err then
@@ -557,7 +558,7 @@ function _test()
   txbuf = data.new(msize)
   rxbuf = data.new(msize)
 
-  err, root = attach("iru", "")
+  local err, root = attach("iru", "")
   if err then
     perrnl(err)
     return
@@ -583,9 +584,9 @@ function _test()
     return
   end
 
-  ftext = "this is a test\n"
+  local ftext = "this is a test\n"
+  local buf = data.new(ftext)
 
-  buf = data.new(ftext)
   local err, n = write(g, 0, buf)
   if err then
     perrnl(err)
@@ -607,7 +608,7 @@ function _test()
     return
   end
 
-  local err = open(g, 0)
+  err = open(g, 0)
   if err then
     perrnl(err)
     return
@@ -621,21 +622,22 @@ function _test()
 
   -- Remove last byte of the file
   st.length = st.length - 1
-  local err = wstat(g, st)
+  err = wstat(g, st)
   if err then
     perrnl(err)
     return
   end
 
-  local n = st.length < msize-IOHEADSZ and st.length or msize-IOHEADSZ
+  n = st.length < msize-IOHEADSZ and st.length or msize-IOHEADSZ
+  perrnl(#err)
 
-  local err, buf = read(g, 0, n)
+  err, buf = read(g, 0, n)
   if err then
     perrnl(err)
     return
   end
 
-  local err = remove(g)
+  err = remove(g)
   if err then
     perrnl(err)
     return
