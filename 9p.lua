@@ -509,13 +509,15 @@ function _test()
     return
   end
 
-  buf = data.new("test ok\n")
+  ftext = "this is a test\n"
+
+  buf = data.new(ftext)
   local err, n = write(g, 0, buf)
   if err then
     perrnl(err)
     return
   elseif n ~= #buf then
-    perrnl("expected to write " .. #buf .. " but wrote " .. n)
+    perrnl("test expected to write " .. #buf .. " bytes but wrote " .. n)
     return
   end
 
@@ -558,7 +560,11 @@ function _test()
   end
 
   buf:layout{str = {0, #buf, 'string'}}
-  perr(buf.str or "")
+  if buf.str == ftext then
+    perrnl("test ok")
+  else
+    perrnl("test failed")
+  end
 
   clunk(g)
   clunk(f)
