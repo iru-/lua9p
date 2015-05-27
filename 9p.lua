@@ -145,6 +145,54 @@ function getqid(buf)
   return {type = p.type, version = p.version, path = p.path}
 end
 
+function putqid(to, qid)
+  if #to < QIDSZ then return nil end
+
+  local LQid = data.layout{
+                   type    = num9p(0, 1),
+                   version = num9p(1, 4),
+                   path    = num9p(5, 8),
+  }
+  local p = to:segment():layout(LQid)
+
+  p.type    = qid.type
+  p.version = qid.version
+  p.path    = qid.path
+  return to
+end
+
+
+function putstat(to, st)
+  local Lstat = data.layout{
+                size   = num9p(0, 2),
+                type   = num9p(2, 2),
+                dev    = num9p(4, 4),
+                qid    = num9p(8, QIDSZ),
+                mode   = num9p(21, 4),
+                atime  = num9p(25, 4),
+                mtime  = num9p(29, 4),
+                length = num9p(33, 8),
+  }
+
+  local p = to:segment():layout(Lstat)
+
+  p.size   = st.size
+  p.type   = st.type
+  p.dev    = st.dev
+
+  if not putqid(to:segment(8), st.qid) then return nil end
+
+  p.mode   = st.mode
+  p.atime  = st.atime
+  p.mtime  = st.mtime
+  p.length = st.length
+  putstr(to:segment(41), st.name)
+  putstr(to:segment(41 + 2 + #st.name), st.uid)
+  putstr(to:segment(41 + 2 + #st.name + 2 + #st.uid), st.gid)
+  putstr(to:segment(41 + 2 + #st.name + 2 + #st.uid + 2 + #st.gid), st.muid)
+  return to
+end
+
 function putheader(to, type, size)
   local Lheader = data.layout{
                     size = num9p(0, 4),
@@ -159,6 +207,7 @@ function putheader(to, type, size)
   p.tag  = tag()
   return p.size
 end
+
 
 function version()
   local LXversion = data.layout{
@@ -469,6 +518,32 @@ function stat(fid)
   return nil, getstat(rx:segment(HEADSZ + 2))
 end
 
+function wstat(fid, st)
+  local LTwstat = data.layout{
+                 fid    = num9p(HEADSZ, FIDSZ),
+                 stsize = num9p(HEADSZ + FIDSZ, 2),
+  }
+
+  local tx = txbuf:segment()
+  tx:layout(LTwstat)
+  tx.fid    = fid.fid
+  tx.stsize = st.size + 2
+
+  local n = putheader(tx, Twstat, FIDSZ + 2 + tx.stsize)
+  dio.write(tx, 0, n - tx.stsize)
+
+  local seg = txbuf:segment(n - tx.stsize)
+
+  if not putstat(seg, st) then
+    return "wstat: tx buffer too small"
+  end
+
+  dio.write(seg, 0, tx.stsize)
+
+  local rx = rxbuf:segment()
+  return readmsg(Rwstat, rx)
+end
+
 function _test()
   local msize, err = version()
   if err then
@@ -545,6 +620,14 @@ function _test()
     return
   end
 
+  -- Remove last byte of the file
+  st.length = st.length - 1
+  local err = wstat(g, st)
+  if err then
+    perrnl(err)
+    return
+  end
+
   local n = st.length < msize-IOHEADSZ and st.length or msize-IOHEADSZ
 
   local err, buf = read(g, 0, n)
@@ -560,7 +643,9 @@ function _test()
   end
 
   buf:layout{str = {0, #buf, 'string'}}
-  if buf.str == ftext then
+
+  -- The trailing \n was removed by wstat, we add it again to check the read
+  if buf.str .. "\n" == ftext then
     perrnl("test ok")
   else
     perrnl("test failed")
