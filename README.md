@@ -9,6 +9,5 @@ Type ```LUADATA=path/to/luadata make``` to build data_io.so.
 
 ## TODO
 
-* wstat
 * auth
 
