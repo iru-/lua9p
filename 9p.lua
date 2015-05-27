@@ -136,13 +136,13 @@ function getqid(buf)
   if #buf < QIDSZ then return nil end
 
   local LQid = data.layout{
-                   type = num9p(0, 1),
-                   vers = num9p(1, 4),
-                   path = num9p(5, 8),
+                   type    = num9p(0, 1),
+                   version = num9p(1, 4),
+                   path    = num9p(5, 8),
   }
 
   local p = buf:segment():layout(LQid)
-  return {type = p.type, version = p.vers, path = p.path}
+  return {type = p.type, version = p.version, path = p.path}
 end
 
 function putheader(to, type, size)
@@ -182,7 +182,7 @@ end
 
 function attach(uname, aname)
   local LTattach = data.layout{
-                   fid  = num9p(HEADSZ, 4),
+                   fid  = num9p(HEADSZ, FIDSZ),
                    afid = num9p(11, 4),
   }
 
@@ -205,7 +205,7 @@ function attach(uname, aname)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
-    return "overflow copying qid", nil
+    return "attach: overflow copying qid", nil
   end
 
   return nil, fid
@@ -269,13 +269,13 @@ function walk(ofid, nfid, path)
   end
   
   if not nfid.qid then
-    return "overflow copying qid"
+    return "walk: file '" .. path .. "' not found"
   end
 end
 
 function open(fid, mode)
   local LTopen = data.layout{
-                 fid  = num9p(HEADSZ, 4),
+                 fid  = num9p(HEADSZ, FIDSZ),
                  mode = num9p(11, 1),
   }
 
@@ -293,7 +293,7 @@ function open(fid, mode)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
-    return "overflow copying qid"
+    return "open: overflow copying qid"
   end
 
   return nil
@@ -304,7 +304,7 @@ function create(fid, name, perm, mode)
   local n = putstr(tx:segment(11), name)
   
   local LTcreate = data.layout{
-                   fid  = num9p(HEADSZ, 4),
+                   fid  = num9p(HEADSZ, FIDSZ),
                    perm = num9p(11 + n, 4),
                    mode = num9p(11 + n + 4, 1),
   }
@@ -323,7 +323,7 @@ function create(fid, name, perm, mode)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
-    return "overflow copying qid"
+    return "create: overflow copying qid"
   end
 
   return nil
@@ -359,7 +359,7 @@ end
 
 function write(fid, offset, seg)
   local LTwrite = data.layout{
-                  fid    = num9p(HEADSZ, 4),
+                  fid    = num9p(HEADSZ, FIDSZ),
                   offset = num9p(HEADSZ + FIDSZ, 8),
                   count  = num9p(HEADSZ + FIDSZ + 8, 4),
   }
@@ -428,6 +428,7 @@ function getstat(seg)
   local p = seg:segment():layout(Lstat)
   local st = {}
 
+  st.size   = p.size
   st.type   = p.type
   st.dev    = p.dev
   st.qid    = getqid(seg:segment(8))
@@ -449,14 +450,14 @@ end
 
 function stat(fid)
   local LTstat = data.layout{
-                 fid = num9p(HEADSZ, 4),
+                 fid = num9p(HEADSZ, FIDSZ),
   }
 
   local tx = txbuf:segment()
   tx:layout(LTstat)
   tx.fid = fid.fid
 
-  local n = putheader(tx, Tstat, 4)
+  local n = putheader(tx, Tstat, FIDSZ)
   dio.write(tx, 0, n)
   
   local rx = rxbuf:segment()
