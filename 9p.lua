@@ -161,6 +161,40 @@ function putqid(to, qid)
   return to
 end
 
+function getstat(seg)
+  local Lstat = data.layout{
+                size   = num9p(0, 2),
+                type   = num9p(2, 2),
+                dev    = num9p(4, 4),
+                qid    = num9p(8, QIDSZ),
+                mode   = num9p(21, 4),
+                atime  = num9p(25, 4),
+                mtime  = num9p(29, 4),
+                length = num9p(33, 8),
+  }
+
+  local p = seg:segment():layout(Lstat)
+  local st = {}
+
+  st.size   = p.size
+  st.type   = p.type
+  st.dev    = p.dev
+  st.qid    = getqid(seg:segment(8))
+  if not st.qid then
+    return nil
+  end
+
+  st.mode   = p.mode
+  st.atime  = p.atime
+  st.mtime  = p.mtime
+  st.length = p.length
+  st.name   = getstr(seg:segment(41))
+  st.uid    = getstr(seg:segment(41 + 2 + #st.name))
+  st.gid    = getstr(seg:segment(41 + 2 + #st.name + 2 + #st.uid))
+  st.muid   = getstr(seg:segment(41 + 2 + #st.name + 2 + #st.uid + 2 + #st.gid))
+
+  return st
+end
 
 function putstat(to, st)
   local Lstat = data.layout{
@@ -460,41 +494,6 @@ end
 
 function remove(fid)
   return clunkrm(Tremove, fid)
-end
-
-function getstat(seg)
-  local Lstat = data.layout{
-                size   = num9p(0, 2),
-                type   = num9p(2, 2),
-                dev    = num9p(4, 4),
-                qid    = num9p(8, QIDSZ),
-                mode   = num9p(21, 4),
-                atime  = num9p(25, 4),
-                mtime  = num9p(29, 4),
-                length = num9p(33, 8),
-  }
-
-  local p = seg:segment():layout(Lstat)
-  local st = {}
-
-  st.size   = p.size
-  st.type   = p.type
-  st.dev    = p.dev
-  st.qid    = getqid(seg:segment(8))
-  if not st.qid then
-    return nil
-  end
-
-  st.mode   = p.mode
-  st.atime  = p.atime
-  st.mtime  = p.mtime
-  st.length = p.length
-  st.name   = getstr(seg:segment(41))
-  st.uid    = getstr(seg:segment(41 + 2 + #st.name))
-  st.gid    = getstr(seg:segment(41 + 2 + #st.name + 2 + #st.uid))
-  st.muid   = getstr(seg:segment(41 + 2 + #st.name + 2 + #st.uid + 2 + #st.gid))
-
-  return st
 end
 
 function stat(fid)
