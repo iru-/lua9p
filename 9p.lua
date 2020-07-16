@@ -1,47 +1,45 @@
-data = require "data"
-io = require "io"
+local data = require'data'
 
 -- message types
-Tversion = 100
-Rversion = 101
-Tauth    = 102
-Rauth    = 103
-Tattach  = 104
-Rattach  = 105
-Rerror   = 107
-Tflush   = 108
-Rflush   = 109
-Twalk    = 110
-Rwalk    = 111
-Topen    = 112
-Ropen    = 113
-Tcreate  = 114
-Rcreate  = 115
-Tread    = 116
-Rread    = 117
-Twrite   = 118
-Rwrite   = 119
-Tclunk   = 120
-Rclunk   = 121
-Tremove  = 122
-Rremove  = 123
-Tstat    = 124
-Rstat    = 125
-Twstat   = 126
-Rwstat   = 127
-Tmax     = 128
+local Tversion = 100
+local Rversion = 101
+local Tauth    = 102
+local Rauth    = 103
+local Tattach  = 104
+local Rattach  = 105
+local Rerror   = 107
+local Tflush   = 108
+local Rflush   = 109
+local Twalk    = 110
+local Rwalk    = 111
+local Topen    = 112
+local Ropen    = 113
+local Tcreate  = 114
+local Rcreate  = 115
+local Tread    = 116
+local Rread    = 117
+local Twrite   = 118
+local Rwrite   = 119
+local Tclunk   = 120
+local Rclunk   = 121
+local Tremove  = 122
+local Rremove  = 123
+local Tstat    = 124
+local Rstat    = 125
+local Twstat   = 126
+local Rwstat   = 127
+local Tmax     = 128
 
+local HEADSZ   = 7
+local FIDSZ    = 4
+local QIDSZ    = 13
+local IOHEADSZ = 24  -- io (Twrite/Rread) header size, i.e. minimum msize
 
-HEADSZ   = 7
-FIDSZ    = 4
-QIDSZ    = 13
-IOHEADSZ = 24    -- io (Twrite/Rread) header size, i.e. minimum msize
+local fidfree   = nil
+local fidactive = nil
+local nextfid   = 0
 
-fidfree   = nil
-fidactive = nil
-nextfid   = 0
-
-function newfid()
+local function newfid()
   local f = fidfree
 
   if (f) then
@@ -59,26 +57,26 @@ function newfid()
   return f
 end
 
-function freefid(f)
+local function freefid(f)
   f.next = fidfree
   fidfree = f
 end
 
-curtag = 65535
+local curtag = 0xFFFF
 function tag()
   local t = curtag
-  curtag = (curtag + 1) % 65535
+  curtag = (curtag + 1) % 0xFFFF
   return t
 end
 
-function perr(s) io.stderr:write(s) end
-function perrnl(s) perr(s .. "\n") end
+local function perr(s) io.stderr:write(s) end
+local function perrnl(s) perr(s .. "\n") end
 
-function pqid(q)
+local function pqid(q)
   perr("(" .. q.path .. " " .. q.version .. " " .. q.type .. ")")
 end
 
-function pfid(f)
+local function pfid(f)
   perr("fid " .. f.fid .. " ")
   if f.qid then
     pqid(f.qid)
@@ -86,7 +84,7 @@ function pfid(f)
   perr("\n")
 end
 
-function pstat(st)
+local function pstat(st)
   perr("type " .. st.type .. " dev " .. st.dev .. " qid ")
   pqid(st.qid)
   perr(" mode " .. st.mode .. " atime " .. st.atime .. " mtime " .. st.mtime .. " length " .. st.length)
@@ -96,11 +94,11 @@ end
 
 
 -- Returns a 9P number in table format. Offset and size in bytes
-function num9p(offset, size)
+local function num9p(offset, size)
   return {offset*8, size*8, 'number', 'le'}
 end
 
-function putstr(to, s)
+local function putstr(to, s)
   if #s > #to - 2 then
     return 0
   end
@@ -116,14 +114,14 @@ function putstr(to, s)
   return 2 + #s
 end
 
-function getstr(from)
+local function getstr(from)
   local p = from:segment():layout{len = num9p(0, 2)}
   p:layout{str = {2, p.len, 's'}}
 
   return p.str or ""
 end
 
-function readmsg(type)
+local function readmsg(type)
   local rawsize = io.read(4)
   local bsize = data.new(rawsize):segment()
   local size = bsize:layout{ size = num9p(0, 4) }.size
@@ -147,18 +145,18 @@ function readmsg(type)
   return nil, buf
 end
 
-function writemsg(buf)
+local function writemsg(buf)
   io.write(tostring(buf))
   io.output():flush()
 end
 
-LQid = data.layout{
+local LQid = data.layout{
        type    = num9p(0, 1),
        version = num9p(1, 4),
        path    = num9p(5, 8),
 }
 
-function getqid(from)
+local function getqid(from)
   if #from < QIDSZ then
     return nil
   end
@@ -173,7 +171,7 @@ function getqid(from)
   return qid
 end
 
-function putqid(to, qid)
+local function putqid(to, qid)
   if #to < QIDSZ then
     return nil
   end
@@ -185,7 +183,7 @@ function putqid(to, qid)
   return to
 end
 
-Lstat = data.layout{
+local Lstat = data.layout{
         size   = num9p(0,  2),
         type   = num9p(2,  2),
         dev    = num9p(4,  4),
@@ -196,7 +194,7 @@ Lstat = data.layout{
         length = num9p(33, 8),
 }
 
-function getstat(seg)
+local function getstat(seg)
   local p = seg:segment():layout(Lstat)
   local st = {}
 
@@ -220,7 +218,7 @@ function getstat(seg)
   return st
 end
 
-function putstat(to, st)
+local function putstat(to, st)
   local p = to:segment():layout(Lstat)
 
   p.size   = st.size
@@ -243,7 +241,7 @@ function putstat(to, st)
   return to
 end
 
-function putheader(to, type, size)
+local function putheader(to, type, size)
   local Lheader = data.layout{
                   size = num9p(0, 4),
                   type = num9p(4, 1),
@@ -259,7 +257,7 @@ function putheader(to, type, size)
 end
 
 
-function version()
+local function version()
   local LXversion = data.layout{
                     msize = num9p(HEADSZ, 4),
   }
@@ -279,7 +277,7 @@ function version()
   return buf.msize
 end
 
-function attach(uname, aname)
+local function attach(uname, aname)
   local LTattach = data.layout{
                    fid  = num9p(HEADSZ,          FIDSZ),
                    afid = num9p(HEADSZ + FIDSZ,  4),
@@ -310,7 +308,7 @@ function attach(uname, aname)
   return nil, fid
 end
 
-function breakpath(path)
+local function breakpath(path)
   local t = {}
   local k = 1
   local i = 1
@@ -325,7 +323,7 @@ function breakpath(path)
 end
 
 -- path == nil clones ofid to nfid
-function walk(ofid, nfid, path)
+local function walk(ofid, nfid, path)
   local LTwalk = data.layout{
                  fid    = num9p(HEADSZ,                  FIDSZ),
                  newfid = num9p(HEADSZ + FIDSZ,          FIDSZ),
@@ -377,7 +375,7 @@ function walk(ofid, nfid, path)
   return "walk: file '" .. path .. "' not found"
 end
 
-function open(fid, mode)
+local function open(fid, mode)
   local LTopen = data.layout{
                  fid  = num9p(HEADSZ,          FIDSZ),
                  mode = num9p(HEADSZ + FIDSZ,  1),
@@ -402,7 +400,7 @@ function open(fid, mode)
   return nil
 end
 
-function create(fid, name, perm, mode)
+local function create(fid, name, perm, mode)
   local tx = txbuf:segment()
   local n = putstr(tx:segment(11), name)
   
@@ -431,7 +429,7 @@ function create(fid, name, perm, mode)
   return nil
 end
                    
-function read(fid, offset, count)
+local function read(fid, offset, count)
   local LTread = data.layout{
                  fid    = num9p(HEADSZ,              FIDSZ),
                  offset = num9p(HEADSZ + FIDSZ,      8),
@@ -459,7 +457,7 @@ function read(fid, offset, count)
   return nil, rx:segment(HEADSZ + 4, rx.count)
 end
 
-function write(fid, offset, seg)
+local function write(fid, offset, seg)
   local LTwrite = data.layout{
                   fid    = num9p(HEADSZ,              FIDSZ),
                   offset = num9p(HEADSZ + FIDSZ,      8),
@@ -487,7 +485,7 @@ function write(fid, offset, seg)
   return nil, rx.count
 end
 
-function clunkrm(type, fid)
+local function clunkrm(type, fid)
   local LTclunkrm = data.layout{
                    fid = num9p(HEADSZ, FIDSZ),
   }
@@ -506,11 +504,11 @@ function clunkrm(type, fid)
   return nil
 end
 
-function clunk(fid)
+local function clunk(fid)
   return clunkrm(Tclunk, fid)
 end
 
-function remove(fid)
+local function remove(fid)
   return clunkrm(Tremove, fid)
 end
 
@@ -534,7 +532,7 @@ function stat(fid)
   return nil, getstat(rx:segment(HEADSZ + 2))
 end
 
-function wstat(fid, st)
+local function wstat(fid, st)
   local LTwstat = data.layout{
                  fid    = num9p(HEADSZ,          FIDSZ),
                  stsize = num9p(HEADSZ + FIDSZ,  2),
@@ -558,8 +556,7 @@ function wstat(fid, st)
   return readmsg(Rwstat)
 end
 
--- TODO: local vars should be local
-function _test()
+local function _test()
   local msize, err = version()
   if err then
     perrnl(err)
