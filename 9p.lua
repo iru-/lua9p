@@ -1,6 +1,5 @@
 data = require "data"
-dio  = require "data_io"
-io   = require "io"
+io = require "io"
 
 -- message types
 Tversion = 100
@@ -124,15 +123,19 @@ function getstr(from)
   return p.str or ""
 end
 
-function readmsg(type, to)
-  local p = to:segment()
-  p:layout{
-    size = num9p(0, 4),
-    type = num9p(4, 1),
-  }
+function readmsg(type)
+  local rawsize = io.read(4)
+  local bsize = data.new(rawsize):segment()
+  local size = bsize:layout{ size = num9p(0, 4) }.size
 
-  dio.read(to, 0, 4)
-  dio.read(to, 4, p.size - 4)
+  local rawrest = io.read(size - 4)
+
+  local buf = data.new(rawsize .. rawrest):segment()
+
+  local p = buf:layout{
+    size = num9p(0, 4),
+    type = num9p(4, 1)
+  }
 
   if (p.type ~= type) then
     if (p.type == Rerror) then
@@ -141,7 +144,12 @@ function readmsg(type, to)
       return "Wrong response type " .. p.type .. ", expected " .. type
     end
   end
-  return nil
+  return nil, buf
+end
+
+function writemsg(buf)
+  io.write(tostring(buf))
+  io.output():flush()
 end
 
 LQid = data.layout{
@@ -262,13 +270,13 @@ function version()
 
   local n = putstr(buf:segment(HEADSZ + 4), "9P2000")
   n = putheader(buf, Tversion, 4 + n)
-  dio.write(buf, 0, n)
+  writemsg(buf)
 
-  buf = data.new(8192)
+  local err, buf = readmsg(Rversion, buf)
+  if err then return nil, err end
+
   buf:layout(LXversion)
-
-  local err = readmsg(Rversion, buf)
-  return buf.msize, err
+  return buf.msize
 end
 
 function attach(uname, aname)
@@ -287,10 +295,9 @@ function attach(uname, aname)
   n = n + putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ + n), aname)
   
   n = putheader(tx, Tattach, FIDSZ + FIDSZ + n)
-  dio.write(tx, 0, n)
+  writemsg(tx:segment(0, n))
 
-  local rx = rxbuf:segment()
-  local err = readmsg(Rattach, rx)
+  local err, rx = readmsg(Rattach)
   if err then
     return err, nil
   end
@@ -346,15 +353,14 @@ function walk(ofid, nfid, path)
   end
 
   n = putheader(tx, Twalk, FIDSZ + FIDSZ + 2 + n)
-  dio.write(tx, 0, n)
+  writemsg(tx:segment(0, n))
 
-  local rx = rxbuf:segment()
-  rx:layout(LRwalk)
-
-  local err = readmsg(Rwalk, rx)
+  local err, rx = readmsg(Rwalk)
   if err then
     return err
   end
+
+  rx:layout(LRwalk)
 
   -- clone succeded
   if (rx.nwqid == 0 and not path) then
@@ -383,10 +389,9 @@ function open(fid, mode)
   tx.mode = mode
 
   local n = putheader(tx, Topen, 5)
-  dio.write(tx, 0, n)
+  writemsg(tx:segment(0, n))
 
-  local rx = rxbuf:segment()
-  local err = readmsg(Ropen, rx)
+  local err, rx = readmsg(Ropen)
   if err then return err end
 
   fid.qid = getqid(rx:segment(HEADSZ))
@@ -413,10 +418,9 @@ function create(fid, name, perm, mode)
   tx.mode = mode
 
   local n = putheader(tx, Tcreate, n + 9)
-  dio.write(tx, 0, n)
+  writemsg(tx:segment(0, n))
 
-  local rx = rxbuf:segment()
-  local err = readmsg(Rcreate, rx)
+  local err, rx = readmsg(Rcreate)
   if err then return err end
 
   fid.qid = getqid(rx:segment(HEADSZ))
@@ -445,12 +449,12 @@ function read(fid, offset, count)
   tx.count  = count
 
   local n = putheader(tx, Tread, FIDSZ + 8 + 4)
-  dio.write(tx, 0, n)
+  writemsg(tx:segment(0, n))
 
-  local rx = rxbuf:segment()
-  rx:layout(LRread)
-  local err = readmsg(Rread, rx)
+  local err, rx = readmsg(Rread)
   if err then return err, nil end
+
+  rx:layout(LRread)
 
   return nil, rx:segment(HEADSZ + 4, rx.count)
 end
@@ -473,13 +477,13 @@ function write(fid, offset, seg)
   tx.count  = #seg
 
   local n = putheader(tx, Twrite, FIDSZ + 8 + 4 + #seg)
-  dio.write(tx, 0, n - #seg)
-  dio.write(seg, 0, #seg)
+  writemsg(tx:segment(0, n - #seg))
+  writemsg(seg:segment(0, #seg))
 
-  local rx = rxbuf:segment()
-  rx:layout(LRwrite)
-  local err = readmsg(Rwrite, rx)
+  local err, rx = readmsg(Rwrite)
   if err then return err, -1 end
+
+  rx:layout(LRwrite)
   return nil, rx.count
 end
 
@@ -493,10 +497,9 @@ function clunkrm(type, fid)
   tx.fid = fid.fid
 
   local n = putheader(tx, type, FIDSZ)
-  dio.write(tx, 0, n)
+  writemsg(tx:segment(0, n))
 
-  local rx = rxbuf:segment()
-  local err = readmsg(type+1, rx)
+  local err, rx = readmsg(type+1)
   if err then return err end
 
   freefid(fid)
@@ -521,10 +524,9 @@ function stat(fid)
   tx.fid = fid.fid
 
   local n = putheader(tx, Tstat, FIDSZ)
-  dio.write(tx, 0, n)
+  writemsg(tx:segment(0, n))
   
-  local rx = rxbuf:segment()
-  local err = readmsg(Rstat, rx)
+  local err, rx = readmsg(Rstat)
   if err then
     return err, nil
   end
@@ -544,7 +546,7 @@ function wstat(fid, st)
   tx.stsize = st.size + 2
 
   local n = putheader(tx, Twstat, FIDSZ + 2 + tx.stsize)
-  dio.write(tx, 0, n - tx.stsize)
+  writemsg(tx:segment(0, n - tx.stsize))
 
   local seg = txbuf:segment(n - tx.stsize)
 
@@ -552,10 +554,8 @@ function wstat(fid, st)
     return "wstat: tx buffer too small"
   end
 
-  dio.write(seg, 0, tx.stsize)
-
-  local rx = rxbuf:segment()
-  return readmsg(Rwstat, rx)
+  writemsg(seg:segment(0, tx.stsize))
+  return readmsg(Rwstat)
 end
 
 -- TODO: local vars should be local
