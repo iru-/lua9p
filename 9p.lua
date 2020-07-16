@@ -1,5 +1,7 @@
 local data = require'data'
 
+local np = {}
+
 -- message types
 local Tversion = 100
 local Rversion = 101
@@ -39,7 +41,7 @@ local fidfree   = nil
 local fidactive = nil
 local nextfid   = 0
 
-local function newfid()
+function np.newfid()
   local f = fidfree
 
   if (f) then
@@ -68,9 +70,6 @@ function tag()
   curtag = (curtag + 1) % 0xFFFF
   return t
 end
-
-local function perr(s) io.stderr:write(s) end
-local function perrnl(s) perr(s .. "\n") end
 
 local function pqid(q)
   perr("(" .. q.path .. " " .. q.version .. " " .. q.type .. ")")
@@ -257,7 +256,7 @@ local function putheader(to, type, size)
 end
 
 
-local function version()
+function np.version()
   local LXversion = data.layout{
                     msize = num9p(HEADSZ, 4),
   }
@@ -270,14 +269,16 @@ local function version()
   n = putheader(buf, Tversion, 4 + n)
   writemsg(buf)
 
-  local err, buf = readmsg(Rversion, buf)
+  local err, buf = readmsg(Rversion)
   if err then return nil, err end
 
   buf:layout(LXversion)
+  if buf.msize < IOHEADSZ then return "short msize" end
+
   return buf.msize
 end
 
-local function attach(uname, aname)
+function np.attach(uname, aname)
   local LTattach = data.layout{
                    fid  = num9p(HEADSZ,          FIDSZ),
                    afid = num9p(HEADSZ + FIDSZ,  4),
@@ -286,7 +287,7 @@ local function attach(uname, aname)
   local tx = txbuf:segment()
   tx:layout(LTattach)
 
-  local fid = newfid()
+  local fid = np.newfid()
   tx.fid  = fid.fid
   tx.afid = -1
   local n = putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ), uname)
@@ -323,7 +324,7 @@ local function breakpath(path)
 end
 
 -- path == nil clones ofid to nfid
-local function walk(ofid, nfid, path)
+function np.walk(ofid, nfid, path)
   local LTwalk = data.layout{
                  fid    = num9p(HEADSZ,                  FIDSZ),
                  newfid = num9p(HEADSZ + FIDSZ,          FIDSZ),
@@ -375,7 +376,7 @@ local function walk(ofid, nfid, path)
   return "walk: file '" .. path .. "' not found"
 end
 
-local function open(fid, mode)
+function np.open(fid, mode)
   local LTopen = data.layout{
                  fid  = num9p(HEADSZ,          FIDSZ),
                  mode = num9p(HEADSZ + FIDSZ,  1),
@@ -400,7 +401,7 @@ local function open(fid, mode)
   return nil
 end
 
-local function create(fid, name, perm, mode)
+function np.create(fid, name, perm, mode)
   local tx = txbuf:segment()
   local n = putstr(tx:segment(11), name)
   
@@ -429,7 +430,7 @@ local function create(fid, name, perm, mode)
   return nil
 end
                    
-local function read(fid, offset, count)
+function np.read(fid, offset, count)
   local LTread = data.layout{
                  fid    = num9p(HEADSZ,              FIDSZ),
                  offset = num9p(HEADSZ + FIDSZ,      8),
@@ -457,7 +458,7 @@ local function read(fid, offset, count)
   return nil, rx:segment(HEADSZ + 4, rx.count)
 end
 
-local function write(fid, offset, seg)
+function np.write(fid, offset, seg)
   local LTwrite = data.layout{
                   fid    = num9p(HEADSZ,              FIDSZ),
                   offset = num9p(HEADSZ + FIDSZ,      8),
@@ -504,15 +505,15 @@ local function clunkrm(type, fid)
   return nil
 end
 
-local function clunk(fid)
+function np.clunk(fid)
   return clunkrm(Tclunk, fid)
 end
 
-local function remove(fid)
+function np.remove(fid)
   return clunkrm(Tremove, fid)
 end
 
-function stat(fid)
+function np.stat(fid)
   local LTstat = data.layout{
                  fid = num9p(HEADSZ, FIDSZ),
   }
@@ -532,7 +533,7 @@ function stat(fid)
   return nil, getstat(rx:segment(HEADSZ + 2))
 end
 
-local function wstat(fid, st)
+function np.wstat(fid, st)
   local LTwstat = data.layout{
                  fid    = num9p(HEADSZ,          FIDSZ),
                  stsize = num9p(HEADSZ + FIDSZ,  2),
@@ -556,121 +557,4 @@ local function wstat(fid, st)
   return readmsg(Rwstat)
 end
 
-local function _test()
-  local msize, err = version()
-  if err then
-    perrnl(err)
-    return
-  end
-  if msize < IOHEADSZ then
-    perrnl("short msize")
-    return
-  end
-
-  txbuf = data.new(msize)
-  rxbuf = data.new(msize)
-
-  local err, root = attach("iru", "")
-  if err then
-    perrnl(err)
-    return
-  end
-
-  local f, g = newfid(), newfid()
-
-  err = walk(root, f, "/tmp")
-  if err then
-    perrnl(err)
-    return
-  end
-
-  err = walk(f, g)
-  if err then
-    perrnl(err)
-    return
-  end
-
-  err = create(g, "file", 420, 1)
-  if err then
-    perrnl(err)
-    return
-  end
-
-  local ftext = "this is a test\n"
-  local buf = data.new(ftext)
-
-  local err, n = write(g, 0, buf)
-  if err then
-    perrnl(err)
-    return
-  elseif n ~= #buf then
-    perrnl("test expected to write " .. #buf .. " bytes but wrote " .. n)
-    return
-  end
-
-  local err = clunk(g)
-  if err then
-    perrnl(err)
-    return
-  end
-
-  local err = walk(root, g, "/tmp/.lua9p.non.existant..")
-  if not err then
-    perrnl("test: succeded in walking to non-existing file")
-    return
-  end
-
-  local err = walk(root, g, "/tmp/file")
-  if err then
-    perrnl(err)
-    return
-  end
-
-  err = open(g, 0)
-  if err then
-    perrnl(err)
-    return
-  end
-
-  local err, st = stat(g)
-  if err then
-    perrnl(err)
-    return
-  end
-
-  -- Remove last byte of the file
-  st.length = st.length - 1
-  err = wstat(g, st)
-  if err then
-    perrnl(err)
-    return
-  end
-
-  n = st.length < msize-IOHEADSZ and st.length or msize-IOHEADSZ
-
-  err, buf = read(g, 0, n)
-  if err then
-    perrnl(err)
-    return
-  end
-
-  err = remove(g)
-  if err then
-    perrnl(err)
-    return
-  end
-
-  buf:layout{str = {0, #buf, 'string'}}
-
-  -- The trailing \n was removed by wstat, we add it again to check the read
-  if buf.str .. "\n" == ftext then
-    perrnl("test ok")
-  else
-    perrnl("test failed")
-  end
-
-  clunk(f)
-  clunk(root)
-end
-
-_test()
+return np
