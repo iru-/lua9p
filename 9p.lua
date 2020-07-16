@@ -103,7 +103,7 @@ end
 local function readmsg(type)
   local rawsize = io.read(4)
   local bsize = data.new(rawsize):segment()
-  local size = bsize:layout{ size = num9p(0, 4) }.size
+  local size = bsize:layout{size = num9p(0, 4)}.size
 
   local rawrest = io.read(size - 4)
 
@@ -116,12 +116,13 @@ local function readmsg(type)
 
   if p.type ~= type then
     if p.type == Rerror then
-      return getstr(p:segment(HEADSZ))
+      error(getstr(p:segment(HEADSZ)))
     else
-      return "Wrong response type " .. p.type .. ", expected " .. type
+      error("Wrong response type " .. p.type .. ", expected " .. type)
     end
   end
-  return nil, buf
+
+  return buf
 end
 
 local function writemsg(buf)
@@ -247,11 +248,12 @@ function np.version()
   n = putheader(buf, Tversion, 4 + n)
   writemsg(buf)
 
-  local err, buf = readmsg(Rversion)
-  if err then return nil, err end
-
+  local buf = readmsg(Rversion)
   buf:layout(LXversion)
-  if buf.msize < IOHEADSZ then return "short msize" end
+
+  if buf.msize < IOHEADSZ then
+    error("short msize")
+  end
 
   return buf.msize
 end
@@ -274,17 +276,14 @@ function np.attach(uname, aname)
   n = putheader(tx, Tattach, FIDSZ + FIDSZ + n)
   writemsg(tx:segment(0, n))
 
-  local err, rx = readmsg(Rattach)
-  if err then
-    return err, nil
-  end
+  local rx = readmsg(Rattach)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
-    return "attach: overflow copying qid", nil
+    error("attach: overflow copying qid")
   end
 
-  return nil, fid
+  return fid
 end
 
 local function breakpath(path)
@@ -328,26 +327,22 @@ function np.walk(ofid, nfid, path)
   n = putheader(tx, Twalk, FIDSZ + FIDSZ + 2 + n)
   writemsg(tx:segment(0, n))
 
-  local err, rx = readmsg(Rwalk)
-  if err then
-    return err
-  end
-
+  local rx = readmsg(Rwalk)
   rx:layout{nwqid = num9p(HEADSZ, 2)}
 
-  -- clone succeded
+  -- clone succeeded
   if rx.nwqid == 0 and not path then
     nfid.qid = ofid.qid
-    return nil
+    return
   end
 
-  -- walk succeded
+  -- walk succeeded
   if rx.nwqid == tx.nwname then
     nfid.qid = getqid(rx:segment(HEADSZ + 2 + (rx.nwqid-1)*QIDSZ))
-    return nil
+    return
   end
 
-  return "walk: file '" .. path .. "' not found"
+  error("file '" .. path .. "' not found")
 end
 
 function np.open(fid, mode)
@@ -362,15 +357,12 @@ function np.open(fid, mode)
   local n = putheader(tx, Topen, 5)
   writemsg(tx:segment(0, n))
 
-  local err, rx = readmsg(Ropen)
-  if err then return err end
+  local rx = readmsg(Ropen)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
-    return "open: overflow copying qid"
+    error("overflow copying qid")
   end
-
-  return nil
 end
 
 function np.create(fid, name, perm, mode)
@@ -390,15 +382,12 @@ function np.create(fid, name, perm, mode)
   local n = putheader(tx, Tcreate, n + 9)
   writemsg(tx:segment(0, n))
 
-  local err, rx = readmsg(Rcreate)
-  if err then return err end
+  local rx = readmsg(Rcreate)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
-    return "create: overflow copying qid"
+    error("overflow copying qid")
   end
-
-  return nil
 end
                    
 function np.read(fid, offset, count)
@@ -415,11 +404,9 @@ function np.read(fid, offset, count)
   local n = putheader(tx, Tread, FIDSZ + 8 + 4)
   writemsg(tx:segment(0, n))
 
-  local err, rx = readmsg(Rread)
-  if err then return err, nil end
-
+  local rx = readmsg(Rread)
   rx:layout{count = num9p(HEADSZ, 4)}
-  return nil, rx:segment(HEADSZ + 4, rx.count)
+  return rx:segment(HEADSZ + 4, rx.count)
 end
 
 function np.write(fid, offset, seg)
@@ -437,11 +424,9 @@ function np.write(fid, offset, seg)
   writemsg(tx:segment(0, n - #seg))
   writemsg(seg:segment(0, #seg))
 
-  local err, rx = readmsg(Rwrite)
-  if err then return err, -1 end
-
+  local rx = readmsg(Rwrite)
   rx:layout{count = num9p(HEADSZ, 4)}
-  return nil, rx.count
+  return rx.count
 end
 
 local function clunkrm(type, fid)
@@ -451,11 +436,8 @@ local function clunkrm(type, fid)
   local n = putheader(tx, type, FIDSZ)
   writemsg(tx:segment(0, n))
 
-  local err, rx = readmsg(type+1)
-  if err then return err end
-
+  readmsg(type+1)
   freefid(fid)
-  return nil
 end
 
 function np.clunk(fid)
@@ -473,12 +455,8 @@ function np.stat(fid)
   local n = putheader(tx, Tstat, FIDSZ)
   writemsg(tx:segment(0, n))
   
-  local err, rx = readmsg(Rstat)
-  if err then
-    return err, nil
-  end
-
-  return nil, getstat(rx:segment(HEADSZ + 2))
+  local rx = readmsg(Rstat)
+  return getstat(rx:segment(HEADSZ + 2))
 end
 
 function np.wstat(fid, st)
@@ -496,7 +474,7 @@ function np.wstat(fid, st)
   local seg = txbuf:segment(n - tx.stsize)
 
   if not putstat(seg, st) then
-    return "wstat: tx buffer too small"
+    error("tx buffer too small")
   end
 
   writemsg(seg:segment(0, tx.stsize))
