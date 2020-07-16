@@ -672,7 +672,6 @@ function _test()
     perrnl("test failed")
   end
 
-  clunk(g)
   clunk(f)
   clunk(root)
 end
