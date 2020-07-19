@@ -31,7 +31,7 @@ local np = require'9p'
 
 local conn = np.attach("iru", "")
 
-local f, g = np.newfid(), np.newfid()
+local f, g = conn:newfid(), conn:newfid()
 
 conn:walk(conn.rootfid, f, "/tmp")
 conn:clone(f, g)

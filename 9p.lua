@@ -65,32 +65,29 @@ local FIDSZ    = 4
 local QIDSZ    = 13
 local IOHEADSZ = 24  -- io (Twrite/Rread) header size, i.e. minimum msize
 
-local fidfree   = nil
-local fidactive = nil
-local nextfid   = 0
 
-function np.newfid()
-  local f = fidfree
+function np.newfid(conn)
+  local f = conn.fidfree
 
   if f then
-    fidfree = f.next
+    conn.fidfree = f.next
   else
     f = {
-      fid = nextfid,
+      fid = conn.nextfid,
       qid = nil,
-      next = fidactive,
+      next = conn.fidactive,
     }
     
-    nextfid = nextfid + 1;
-    fidactive = f
+    conn.nextfid = conn.nextfid + 1;
+    conn.fidactive = f
   end
 
   return f
 end
 
-local function freefid(f)
-  f.next = fidfree
-  fidfree = f
+local function freefid(conn, f)
+  f.next = conn.fidfree
+  conn.fidfree = f
 end
 
 local function tag(conn)
@@ -294,7 +291,7 @@ local function doattach(conn, uname, aname)
   local tx = conn.txbuf:segment()
   tx:layout(LTattach)
 
-  local fid = np.newfid()
+  local fid = conn:newfid()
   tx.fid  = fid.fid
   tx.afid = -1
   local n = putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ), uname)
@@ -316,6 +313,10 @@ end
 function np.attach(uname, aname, msize)
   local conn = np
   conn.curtag = 0xFFFF
+
+  conn.fidfree   = nil
+  conn.fidactive = nil
+  conn.nextfid   = 0
 
   local msize = doversion(conn, msize)
   conn.txbuf = data.new(msize)
@@ -480,7 +481,7 @@ local function clunkrm(conn, type, fid)
   writemsg(tx:segment(0, n))
 
   readmsg(type+1)
-  freefid(fid)
+  freefid(conn, fid)
 end
 
 function np.clunk(conn, fid)
