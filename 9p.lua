@@ -265,12 +265,12 @@ local function putheader(to, type, size)
 end
 
 
-function np.version()
+local function doversion(msize)
   local LXversion = data.layout{msize = num9p(HEADSZ, 4)}
 
   local buf = data.new(19)
   buf:layout(LXversion)
-  buf.msize = 8192+IOHEADSZ
+  buf.msize = msize or 8192+IOHEADSZ
 
   local n = putstr(buf:segment(HEADSZ + 4), "9P2000")
   n = putheader(buf, Tversion, 4 + n)
@@ -286,13 +286,13 @@ function np.version()
   return buf.msize
 end
 
-function np.attach(uname, aname)
+local function doattach(conn, uname, aname)
   local LTattach = data.layout{
     fid  = num9p(HEADSZ,          FIDSZ),
     afid = num9p(HEADSZ + FIDSZ,  4),
   }
 
-  local tx = txbuf:segment()
+  local tx = conn.txbuf:segment()
   tx:layout(LTattach)
 
   local fid = np.newfid()
@@ -314,6 +314,17 @@ function np.attach(uname, aname)
   return fid
 end
 
+function np.attach(uname, aname, msize)
+  local conn = np
+
+  local msize = doversion(msize)
+  conn.txbuf = data.new(msize)
+
+  conn.rootfid = doattach(conn, uname, aname)
+  return conn
+end
+
+
 local function breakpath(path)
   local t = {}
   local k = 1
@@ -329,14 +340,14 @@ local function breakpath(path)
 end
 
 -- path == nil clones ofid to nfid
-function np.walk(ofid, nfid, path)
+function np.walk(conn, ofid, nfid, path)
   local LTwalk = data.layout{
     fid    = num9p(HEADSZ,                  FIDSZ),
     newfid = num9p(HEADSZ + FIDSZ,          FIDSZ),
     nwname = num9p(HEADSZ + FIDSZ + FIDSZ,  2),
   }
 
-  local tx = txbuf:segment()
+  local tx = conn.txbuf:segment()
   tx:layout(LTwalk)
   tx.fid    = ofid.fid
   tx.newfid = nfid.fid
@@ -373,8 +384,8 @@ function np.walk(ofid, nfid, path)
   error("file '" .. path .. "' not found")
 end
 
-function np.open(fid, mode)
-  local tx = txbuf:segment():layout{
+function np.open(conn, fid, mode)
+  local tx = conn.txbuf:segment():layout{
     fid  = num9p(HEADSZ,          FIDSZ),
     mode = num9p(HEADSZ + FIDSZ,  1),
   }
@@ -393,8 +404,8 @@ function np.open(fid, mode)
   end
 end
 
-function np.create(fid, name, perm, mode)
-  local tx = txbuf:segment()
+function np.create(conn, fid, name, perm, mode)
+  local tx = conn.txbuf:segment()
   local n = putstr(tx:segment(11), name)
   
   tx:layout{
@@ -418,8 +429,8 @@ function np.create(fid, name, perm, mode)
   end
 end
                    
-function np.read(fid, offset, count)
-  local tx = txbuf:segment():layout{
+function np.read(conn, fid, offset, count)
+  local tx = conn.txbuf:segment():layout{
     fid    = num9p(HEADSZ,              FIDSZ),
     offset = num9p(HEADSZ + FIDSZ,      8),
     count  = num9p(HEADSZ + FIDSZ + 8,  4),
@@ -437,8 +448,8 @@ function np.read(fid, offset, count)
   return rx:segment(HEADSZ + 4, rx.count)
 end
 
-function np.write(fid, offset, seg)
-  local tx = txbuf:segment():layout{
+function np.write(conn, fid, offset, seg)
+  local tx = conn.txbuf:segment():layout{
     fid    = num9p(HEADSZ,              FIDSZ),
     offset = num9p(HEADSZ + FIDSZ,      8),
     count  = num9p(HEADSZ + FIDSZ + 8,  4),
@@ -457,8 +468,8 @@ function np.write(fid, offset, seg)
   return rx.count
 end
 
-local function clunkrm(type, fid)
-  local tx = txbuf:segment():layout{fid = num9p(HEADSZ, FIDSZ)}
+local function clunkrm(conn, type, fid)
+  local tx = conn.txbuf:segment():layout{fid = num9p(HEADSZ, FIDSZ)}
   tx.fid = fid.fid
 
   local n = putheader(tx, type, FIDSZ)
@@ -468,16 +479,16 @@ local function clunkrm(type, fid)
   freefid(fid)
 end
 
-function np.clunk(fid)
-  return clunkrm(Tclunk, fid)
+function np.clunk(conn, fid)
+  return clunkrm(conn, Tclunk, fid)
 end
 
-function np.remove(fid)
-  return clunkrm(Tremove, fid)
+function np.remove(conn, fid)
+  return clunkrm(conn, Tremove, fid)
 end
 
-function np.stat(fid)
-  local tx = txbuf:segment():layout{fid = num9p(HEADSZ, FIDSZ)}
+function np.stat(conn, fid)
+  local tx = conn.txbuf:segment():layout{fid = num9p(HEADSZ, FIDSZ)}
   tx.fid = fid.fid
 
   local n = putheader(tx, Tstat, FIDSZ)
@@ -487,8 +498,8 @@ function np.stat(fid)
   return getstat(rx:segment(HEADSZ + 2))
 end
 
-function np.wstat(fid, st)
-  local tx = txbuf:segment():layout{
+function np.wstat(conn, fid, st)
+  local tx = conn.txbuf:segment():layout{
     fid    = num9p(HEADSZ,          FIDSZ),
     stsize = num9p(HEADSZ + FIDSZ,  2),
   }
@@ -499,7 +510,7 @@ function np.wstat(fid, st)
   local n = putheader(tx, Twstat, FIDSZ + 2 + tx.stsize)
   writemsg(tx:segment(0, n - tx.stsize))
 
-  local seg = txbuf:segment(n - tx.stsize)
+  local seg = conn.txbuf:segment(n - tx.stsize)
 
   if not putstat(seg, st) then
     error("tx buffer too small")

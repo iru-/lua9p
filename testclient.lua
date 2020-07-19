@@ -29,43 +29,42 @@ SUCH DAMAGE.
 local data = require'data'
 local np = require'9p'
 
-local msize = np.version()
-txbuf = data.new(msize)
+local conn = np.attach("iru", "")
 
-local root = np.attach("iru", "")
 local f, g = np.newfid(), np.newfid()
 
-np.walk(root, f, "/tmp")
-np.walk(f, g)
+conn:walk(conn.rootfid, f, "/tmp")
+conn:walk(f, g)
 
-np.create(g, "file", 420, 1)
+conn:create(g, "file", 420, 1)
 
 local ftext = "this is a test\n"
 local buf = data.new(ftext)
 
-local n = np.write(g, 0, buf)
+local n = conn:write(g, 0, buf)
 if n ~= #buf then
   error("test: expected to write " .. #buf .. " bytes but wrote " .. n)
 end
 
-np.clunk(g)
+conn:clunk(g)
 
-if pcall(np.walk, root, g, "/tmp/.lua9p.non.existant..") ~= false then
+if pcall(np.walk, conn, conn.rootfid, g,
+         "/tmp/.lua9p.non.existant..") ~= false then
   error("test: succeeded when shouldn't (walking to non-existing file)")
 end
 
-np.walk(root, g, "/tmp/file")
-np.open(g, 0)
+conn:walk(conn.rootfid, g, "/tmp/file")
+conn:open(g, 0)
 
-local st = np.stat(g)
+local st = conn:stat(g)
 
 -- Remove last byte of the file
 st.length = st.length - 1
-np.wstat(g, st)
+conn:wstat(g, st)
 
-buf = np.read(g, 0, st.length)
+buf = conn:read(g, 0, st.length)
 
-np.remove(g)
+conn:remove(g)
 
 buf:layout{str = {0, #buf, 'string'}}
 
@@ -76,5 +75,5 @@ else
   error("test failed")
 end
 
-np.clunk(f)
-np.clunk(root)
+conn:clunk(f)
+conn:clunk(conn.rootfid)
