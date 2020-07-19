@@ -34,7 +34,7 @@ local conn = np.attach("iru", "")
 local f, g = np.newfid(), np.newfid()
 
 conn:walk(conn.rootfid, f, "/tmp")
-conn:walk(f, g)
+conn:clone(f, g)
 
 conn:create(g, "file", 420, 1)
 

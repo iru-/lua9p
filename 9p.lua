@@ -384,6 +384,10 @@ function np.walk(conn, ofid, nfid, path)
   error("file '" .. path .. "' not found")
 end
 
+function np.clone(conn, ofid, nfid)
+  np.walk(conn, ofid, nfid)
+end
+
 function np.open(conn, fid, mode)
   local tx = conn.txbuf:segment():layout{
     fid  = num9p(HEADSZ,          FIDSZ),
