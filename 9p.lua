@@ -93,10 +93,9 @@ local function freefid(f)
   fidfree = f
 end
 
-local curtag = 0xFFFF
-function tag()
-  local t = curtag
-  curtag = (curtag + 1) % 0xFFFF
+local function tag(conn)
+  local t = conn.curtag
+  conn.curtag = (conn.curtag + 1) % 0xFFFF
   return t
 end
 
@@ -249,7 +248,7 @@ local function putstat(to, st)
   return to
 end
 
-local function putheader(to, type, size)
+local function putheader(to, type, size, tag)
   local Lheader = data.layout{
     size = num9p(0, 4),
     type = num9p(4, 1),
@@ -260,12 +259,12 @@ local function putheader(to, type, size)
 
   p.size = HEADSZ + size
   p.type = type
-  p.tag  = tag()
+  p.tag  = tag
   return p.size
 end
 
 
-local function doversion(msize)
+local function doversion(conn, msize)
   local LXversion = data.layout{msize = num9p(HEADSZ, 4)}
 
   local buf = data.new(19)
@@ -273,7 +272,7 @@ local function doversion(msize)
   buf.msize = msize or 8192+IOHEADSZ
 
   local n = putstr(buf:segment(HEADSZ + 4), "9P2000")
-  n = putheader(buf, Tversion, 4 + n)
+  n = putheader(buf, Tversion, 4 + n, tag(conn))
   writemsg(buf)
 
   local buf = readmsg(Rversion)
@@ -301,7 +300,7 @@ local function doattach(conn, uname, aname)
   local n = putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ), uname)
   n = n + putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ + n), aname)
   
-  n = putheader(tx, Tattach, FIDSZ + FIDSZ + n)
+  n = putheader(tx, Tattach, FIDSZ + FIDSZ + n, tag(conn))
   writemsg(tx:segment(0, n))
 
   local rx = readmsg(Rattach)
@@ -316,8 +315,9 @@ end
 
 function np.attach(uname, aname, msize)
   local conn = np
+  conn.curtag = 0xFFFF
 
-  local msize = doversion(msize)
+  local msize = doversion(conn, msize)
   conn.txbuf = data.new(msize)
 
   conn.rootfid = doattach(conn, uname, aname)
@@ -363,7 +363,7 @@ function np.walk(conn, ofid, nfid, path)
     tx.nwname = 0
   end
 
-  n = putheader(tx, Twalk, FIDSZ + FIDSZ + 2 + n)
+  n = putheader(tx, Twalk, FIDSZ + FIDSZ + 2 + n, tag(conn))
   writemsg(tx:segment(0, n))
 
   local rx = readmsg(Rwalk)
@@ -397,7 +397,7 @@ function np.open(conn, fid, mode)
   tx.fid  = fid.fid
   tx.mode = mode
 
-  local n = putheader(tx, Topen, 5)
+  local n = putheader(tx, Topen, 5, tag(conn))
   writemsg(tx:segment(0, n))
 
   local rx = readmsg(Ropen)
@@ -422,7 +422,7 @@ function np.create(conn, fid, name, perm, mode)
   tx.perm = perm
   tx.mode = mode
 
-  local n = putheader(tx, Tcreate, n + 9)
+  local n = putheader(tx, Tcreate, n + 9, tag(conn))
   writemsg(tx:segment(0, n))
 
   local rx = readmsg(Rcreate)
@@ -444,7 +444,7 @@ function np.read(conn, fid, offset, count)
   tx.offset = offset
   tx.count  = count
 
-  local n = putheader(tx, Tread, FIDSZ + 8 + 4)
+  local n = putheader(tx, Tread, FIDSZ + 8 + 4, tag(conn))
   writemsg(tx:segment(0, n))
 
   local rx = readmsg(Rread)
@@ -463,7 +463,7 @@ function np.write(conn, fid, offset, seg)
   tx.offset = offset
   tx.count  = #seg
 
-  local n = putheader(tx, Twrite, FIDSZ + 8 + 4 + #seg)
+  local n = putheader(tx, Twrite, FIDSZ + 8 + 4 + #seg, tag(conn))
   writemsg(tx:segment(0, n - #seg))
   writemsg(seg:segment(0, #seg))
 
@@ -476,7 +476,7 @@ local function clunkrm(conn, type, fid)
   local tx = conn.txbuf:segment():layout{fid = num9p(HEADSZ, FIDSZ)}
   tx.fid = fid.fid
 
-  local n = putheader(tx, type, FIDSZ)
+  local n = putheader(tx, type, FIDSZ, tag(conn))
   writemsg(tx:segment(0, n))
 
   readmsg(type+1)
@@ -495,7 +495,7 @@ function np.stat(conn, fid)
   local tx = conn.txbuf:segment():layout{fid = num9p(HEADSZ, FIDSZ)}
   tx.fid = fid.fid
 
-  local n = putheader(tx, Tstat, FIDSZ)
+  local n = putheader(tx, Tstat, FIDSZ, tag(conn))
   writemsg(tx:segment(0, n))
   
   local rx = readmsg(Rstat)
@@ -511,7 +511,7 @@ function np.wstat(conn, fid, st)
   tx.fid    = fid.fid
   tx.stsize = st.size + 2
 
-  local n = putheader(tx, Twstat, FIDSZ + 2 + tx.stsize)
+  local n = putheader(tx, Twstat, FIDSZ + 2 + tx.stsize, tag(conn))
   writemsg(tx:segment(0, n - tx.stsize))
 
   local seg = conn.txbuf:segment(n - tx.stsize)
