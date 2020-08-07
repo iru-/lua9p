@@ -124,12 +124,31 @@ local function getstr(from)
   return p.str or ""
 end
 
-local function readmsg(type)
-  local rawsize = io.read(4)
+local function readmsg(conn, type)
+  local rawsize 
+  local rawrest
+
+  if (conn.sock ~= nil) then
+      rawsize, err = conn.sock:receive(4)
+      if (err ~= nil) then
+        error(err)
+      end
+    else
+      rawsize = io.read(4)
+  end
+
+
   local bsize = data.new(rawsize):segment()
   local size = bsize:layout{size = num9p(0, 4)}.size
 
-  local rawrest = io.read(size - 4)
+  if (conn.sock ~= nil) then
+      rawrest, err = conn.sock:receive(size - 4) 
+      if (err ~= nil) then
+        error(err)
+      end
+    else
+      rawrest = io.read(size - 4)
+  end
 
   local buf = data.new(rawsize .. rawrest):segment()
 
@@ -149,9 +168,13 @@ local function readmsg(type)
   return buf
 end
 
-local function writemsg(buf)
-  io.write(tostring(buf))
-  io.output():flush()
+local function writemsg(conn, buf)
+  if (conn.sock ~= nil) then
+    conn.sock:send(tostring(buf))
+  else
+    io.write(tostring(buf))
+    io.output():flush()
+  end
 end
 
 local LQid = data.layout{
@@ -270,9 +293,9 @@ local function doversion(conn, msize)
 
   local n = putstr(buf:segment(HEADSZ + 4), "9P2000")
   n = putheader(buf, Tversion, 4 + n, tag(conn))
-  writemsg(buf)
+  writemsg(conn, buf)
 
-  local buf = readmsg(Rversion)
+  local buf = readmsg(conn, Rversion)
   buf:layout(LXversion)
 
   if buf.msize < IOHEADSZ then
@@ -298,9 +321,9 @@ local function doattach(conn, uname, aname)
   n = n + putstr(tx:segment(HEADSZ + FIDSZ + FIDSZ + n), aname)
   
   n = putheader(tx, Tattach, FIDSZ + FIDSZ + n, tag(conn))
-  writemsg(tx:segment(0, n))
+  writemsg(conn, tx:segment(0, n))
 
-  local rx = readmsg(Rattach)
+  local rx = readmsg(conn, Rattach)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
@@ -310,9 +333,10 @@ local function doattach(conn, uname, aname)
   return fid
 end
 
-function np.attach(uname, aname, msize)
+function np.attach(sock, uname, aname, msize)
   local conn = np
   conn.curtag = 0xFFFF
+  conn.sock = sock
 
   conn.fidfree   = nil
   conn.fidactive = nil
@@ -365,9 +389,9 @@ function np.walk(conn, ofid, nfid, path)
   end
 
   n = putheader(tx, Twalk, FIDSZ + FIDSZ + 2 + n, tag(conn))
-  writemsg(tx:segment(0, n))
+  writemsg(conn, tx:segment(0, n))
 
-  local rx = readmsg(Rwalk)
+  local rx = readmsg(conn, Rwalk)
   rx:layout{nwqid = num9p(HEADSZ, 2)}
 
   -- clone succeeded
@@ -399,9 +423,9 @@ function np.open(conn, fid, mode)
   tx.mode = mode
 
   local n = putheader(tx, Topen, 5, tag(conn))
-  writemsg(tx:segment(0, n))
+  writemsg(conn, tx:segment(0, n))
 
-  local rx = readmsg(Ropen)
+  local rx = readmsg(conn, Ropen)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
@@ -424,9 +448,9 @@ function np.create(conn, fid, name, perm, mode)
   tx.mode = mode
 
   local n = putheader(tx, Tcreate, n + 9, tag(conn))
-  writemsg(tx:segment(0, n))
+  writemsg(conn, tx:segment(0, n))
 
-  local rx = readmsg(Rcreate)
+  local rx = readmsg(conn, Rcreate)
 
   fid.qid = getqid(rx:segment(HEADSZ))
   if not fid.qid then
@@ -446,9 +470,9 @@ function np.read(conn, fid, offset, count)
   tx.count  = count
 
   local n = putheader(tx, Tread, FIDSZ + 8 + 4, tag(conn))
-  writemsg(tx:segment(0, n))
+  writemsg(conn, tx:segment(0, n))
 
-  local rx = readmsg(Rread)
+  local rx = readmsg(conn, Rread)
   rx:layout{count = num9p(HEADSZ, 4)}
   return rx:segment(HEADSZ + 4, rx.count)
 end
@@ -465,10 +489,10 @@ function np.write(conn, fid, offset, seg)
   tx.count  = #seg
 
   local n = putheader(tx, Twrite, FIDSZ + 8 + 4 + #seg, tag(conn))
-  writemsg(tx:segment(0, n - #seg))
-  writemsg(seg:segment(0, #seg))
+  writemsg(conn, tx:segment(0, n - #seg))
+  writemsg(conn, seg:segment(0, #seg))
 
-  local rx = readmsg(Rwrite)
+  local rx = readmsg(conn, Rwrite)
   rx:layout{count = num9p(HEADSZ, 4)}
   return rx.count
 end
@@ -478,9 +502,9 @@ local function clunkrm(conn, type, fid)
   tx.fid = fid.fid
 
   local n = putheader(tx, type, FIDSZ, tag(conn))
-  writemsg(tx:segment(0, n))
+  writemsg(conn, tx:segment(0, n))
 
-  readmsg(type+1)
+  readmsg(conn, type+1)
   freefid(conn, fid)
 end
 
@@ -497,9 +521,9 @@ function np.stat(conn, fid)
   tx.fid = fid.fid
 
   local n = putheader(tx, Tstat, FIDSZ, tag(conn))
-  writemsg(tx:segment(0, n))
+  writemsg(conn, tx:segment(0, n))
   
-  local rx = readmsg(Rstat)
+  local rx = readmsg(conn, Rstat)
   return getstat(rx:segment(HEADSZ + 2))
 end
 
@@ -513,7 +537,7 @@ function np.wstat(conn, fid, st)
   tx.stsize = st.size + 2
 
   local n = putheader(tx, Twstat, FIDSZ + 2 + tx.stsize, tag(conn))
-  writemsg(tx:segment(0, n - tx.stsize))
+  writemsg(conn, tx:segment(0, n - tx.stsize))
 
   local seg = conn.txbuf:segment(n - tx.stsize)
 
@@ -521,8 +545,8 @@ function np.wstat(conn, fid, st)
     error("tx buffer too small")
   end
 
-  writemsg(seg:segment(0, tx.stsize))
-  return readmsg(Rwstat)
+  writemsg(conn, seg:segment(0, tx.stsize))
+  return readmsg(conn, Rwstat)
 end
 
 return np

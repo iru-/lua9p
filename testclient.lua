@@ -29,7 +29,15 @@ SUCH DAMAGE.
 local data = require'data'
 local np = require'9p'
 
-local conn = np.attach("iru", "")
+local host, port = "127.0.0.1", 3333
+local socket = require("socket")
+tcp = assert(socket.tcp())
+
+local s, err = tcp:connect(host, port)
+if not s then print(err) end
+
+
+local conn = np.attach(tcp, "iru", "")
 
 local f, g = conn:newfid(), conn:newfid()
 
