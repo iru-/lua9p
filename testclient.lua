@@ -1,11 +1,16 @@
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2014-2020 Iruatã Martins dos Santos Souza
 
-
 local data = require'data'
 local np = require'9p'
 
-local conn = np.attach("iru", "")
+local conn = np.newconn(io.read,
+  function (buf)
+    io.write(buf)
+    io.output():flush()
+  end)
+
+conn:attach("iru", "")
 
 local f, g = conn:newfid(), conn:newfid()
 
